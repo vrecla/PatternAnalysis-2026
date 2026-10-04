@@ -293,7 +293,7 @@ def main() -> None:
     plot_history(history, out_dir / "curves.png", f"{args.model} (best epoch {best_epoch})")
 
     # Final test: best checkpoint, evaluated once.
-    ckpt = torch.load(out_dir / "best.pt", map_location=device)
+    ckpt = torch.load(out_dir / "best.pt", map_location=device, weights_only=True)
     model.load_state_dict(ckpt["state_dict"])
     test = evaluate(model, test_loader, device)
     save_test_predictions(test, test_ds.samples, out_dir / "test_predictions.csv")
