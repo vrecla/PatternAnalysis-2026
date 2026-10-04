@@ -1,0 +1,8 @@
+# Never commit model files, datasets or logs (assignment rule).
+*.pt
+*.pth
+*.ckpt
+runs/**/*.pt
+logs/
+__pycache__/
+*.pyc
