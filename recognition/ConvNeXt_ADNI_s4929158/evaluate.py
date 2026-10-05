@@ -98,7 +98,13 @@ def ensure_val_predictions(run_dir: Path, root_override: Optional[str]) -> Path:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     ckpt = torch.load(run_dir / "best.pt", map_location=device, weights_only=True)
     a = ckpt["args"]
-    _, val_ds, _ = get_datasets(root_override or a["root"], a["val_fraction"], a["split_seed"], a["img_size"])
+    # Rebuild the exact split this model was trained on (runs from before the
+    # subject-level fix have no group_by entry and used the scan-level split).
+    _, val_ds, _ = get_datasets(
+        root_override or a["root"], a["val_fraction"], a["split_seed"], a["img_size"],
+        group_by=a.get("group_by", "scan"), meta_path=a.get("meta"),
+        drop_test_overlap=a.get("drop_test_overlap", False),
+    )
     model = build_model(ckpt["model"]).to(device)
     model.load_state_dict(ckpt["state_dict"])
     loader = DataLoader(val_ds, batch_size=128, shuffle=False, num_workers=a.get("num_workers", 4))

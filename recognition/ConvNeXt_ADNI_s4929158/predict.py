@@ -122,7 +122,11 @@ def main() -> None:
     out = Path(args.out_dir or f"predictions/{ckpt_path.parent.name}")
     out.mkdir(parents=True, exist_ok=True)
 
-    _, _, test_ds = get_datasets(args.root or a["root"], a["val_fraction"], a["split_seed"], a["img_size"])
+    _, _, test_ds = get_datasets(
+        args.root or a["root"], a["val_fraction"], a["split_seed"], a["img_size"],
+        group_by=a.get("group_by", "scan"), meta_path=a.get("meta"),
+        drop_test_overlap=a.get("drop_test_overlap", False),
+    )
     model = build_model(ckpt["model"]).to(device)
     model.load_state_dict(ckpt["state_dict"])
     loader = DataLoader(test_ds, batch_size=128, shuffle=False, num_workers=args.num_workers)

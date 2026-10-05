@@ -223,6 +223,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--patience", type=int, default=10, help="early stopping on val loss, 0 disables")
     p.add_argument("--img-size", type=int, default=224)
     p.add_argument("--val-fraction", type=float, default=0.15)
+    p.add_argument("--group-by", choices=["subject", "scan"], default="subject",
+                   help="unit kept intact when splitting train/val (subject needs the metadata JSON)")
+    p.add_argument("--meta", default=None, help="metadata JSON (default: next to the dataset folder)")
+    p.add_argument("--drop-test-overlap", action="store_true",
+                   help="remove subjects that also appear in the test folder from the training data")
     p.add_argument("--split-seed", type=int, default=42, help="fixes the patient split across all runs")
     p.add_argument("--seed", type=int, default=0, help="training seed (init, shuffling, augmentation)")
     p.add_argument("--num-workers", type=int, default=4)
@@ -239,7 +244,10 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # Data: the split depends only on --split-seed, so every model sees identical splits.
-    train_ds, val_ds, test_ds = get_datasets(args.root, args.val_fraction, args.split_seed, args.img_size)
+    train_ds, val_ds, test_ds = get_datasets(
+        args.root, args.val_fraction, args.split_seed, args.img_size,
+        group_by=args.group_by, meta_path=args.meta, drop_test_overlap=args.drop_test_overlap,
+    )
     gen = torch.Generator().manual_seed(args.seed)
     common = dict(batch_size=args.batch_size, num_workers=args.num_workers, pin_memory=device.type == "cuda")
     train_loader = DataLoader(train_ds, shuffle=True, drop_last=True, generator=gen, **common)
