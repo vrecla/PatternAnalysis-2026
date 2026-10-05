@@ -241,6 +241,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--meta", default=None, help="metadata JSON (default: next to the dataset folder)")
     p.add_argument("--drop-test-overlap", action="store_true",
                    help="remove subjects that also appear in the test folder from the training data")
+    p.add_argument("--allow-test-overlap", action="store_true",
+                   help="ABLATION ONLY: keep subjects shared by the official train and test folders (leaky test result)")
     p.add_argument("--split-seed", type=int, default=42, help="fixes the patient split across all runs")
     p.add_argument("--seed", type=int, default=0, help="training seed (init, shuffling, augmentation)")
     p.add_argument("--num-workers", type=int, default=4)
@@ -260,7 +262,7 @@ def main() -> None:
     train_ds, val_ds, test_ds = get_datasets(
         args.root, args.val_fraction, args.split_seed, args.img_size,
         group_by=args.group_by, meta_path=args.meta, drop_test_overlap=args.drop_test_overlap,
-        aug=args.aug,
+        aug=args.aug, allow_test_overlap=args.allow_test_overlap,
     )
     gen = torch.Generator().manual_seed(args.seed)
     common = dict(batch_size=args.batch_size, num_workers=args.num_workers, pin_memory=device.type == "cuda")

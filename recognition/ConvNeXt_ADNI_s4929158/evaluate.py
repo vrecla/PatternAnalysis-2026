@@ -104,6 +104,7 @@ def ensure_val_predictions(run_dir: Path, root_override: Optional[str]) -> Path:
         root_override or a["root"], a["val_fraction"], a["split_seed"], a["img_size"],
         group_by=a.get("group_by", "scan"), meta_path=a.get("meta"),
         drop_test_overlap=a.get("drop_test_overlap", False),
+        allow_test_overlap=a.get("allow_test_overlap", False),
     )
     model = build_model(ckpt["model"], **ckpt.get("model_kwargs", {})).to(device)
     model.load_state_dict(ckpt["state_dict"])
