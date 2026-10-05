@@ -297,6 +297,10 @@ def main() -> None:
     model.load_state_dict(ckpt["state_dict"])
     test = evaluate(model, test_loader, device)
     save_test_predictions(test, test_ds.samples, out_dir / "test_predictions.csv")
+    # Validation logits too: evaluate.py fits temperature scaling and the reject
+    # threshold on these, so nothing is ever tuned on the test set.
+    val_best = evaluate(model, val_loader, device)
+    save_test_predictions(val_best, val_ds.samples, out_dir / "val_predictions.csv")
     inference = measure_inference(model, device, args.img_size)
 
     results = {
