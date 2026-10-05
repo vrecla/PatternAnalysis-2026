@@ -22,7 +22,13 @@
 #SBATCH --time=06:00:00
 #SBATCH --output=logs/%x_%j.out
 
+#
+# Experiments: pass extra train.py flags through EXTRA and name the run with TAG
+# (output goes to runs/<model>_<TAG>, default TAG=subject), e.g.
+#     TAG=v2 EXTRA="--select-metric auroc" sbatch --time=01:00:00 train.sbatch convnext
+
 MODELS=${@:-convnext}
+TAG=${TAG:-subject}
 
 source ~/venvs/comp3710/bin/activate
 cd "$SLURM_SUBMIT_DIR" || exit 1
@@ -30,5 +36,5 @@ cd "$SLURM_SUBMIT_DIR" || exit 1
 for MODEL in $MODELS; do
     echo "=== training $MODEL ==="
     python train.py --model "$MODEL" --num-workers "$SLURM_CPUS_PER_TASK" --amp \
-        --group-by subject --drop-test-overlap --out-dir "runs/${MODEL}_subject"
+        --group-by subject --drop-test-overlap --out-dir "runs/${MODEL}_${TAG}" $EXTRA
 done
