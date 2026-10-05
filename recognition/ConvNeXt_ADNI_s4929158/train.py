@@ -220,7 +220,11 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--weight-decay", type=float, default=0.05)
     p.add_argument("--warmup-epochs", type=int, default=3)
     p.add_argument("--clip-grad", type=float, default=1.0, help="max grad norm, 0 disables")
-    p.add_argument("--patience", type=int, default=10, help="early stopping on val loss, 0 disables")
+    p.add_argument("--patience", type=int, default=10, help="early stopping on the selection metric, 0 disables")
+    p.add_argument("--select-metric", choices=["loss", "auroc", "acc"], default="loss",
+                   help="validation metric used to pick the best epoch and for early stopping")
+    p.add_argument("--drop-path", type=float, default=None,
+                   help="ConvNeXt stochastic-depth rate (default: model default, 0.1)")
     p.add_argument("--img-size", type=int, default=224)
     p.add_argument("--val-fraction", type=float, default=0.15)
     p.add_argument("--group-by", choices=["subject", "scan"], default="subject",
@@ -255,7 +259,8 @@ def main() -> None:
     test_loader = DataLoader(test_ds, shuffle=False, **common)
     print(f"device={device} amp={amp} | train={len(train_ds)} val={len(val_ds)} test={len(test_ds)} slices")
 
-    model = build_model(args.model).to(device)
+    model_kwargs = {"drop_path_rate": args.drop_path} if args.drop_path is not None and args.model == "convnext" else {}
+    model = build_model(args.model, **model_kwargs).to(device)
     n_params = count_parameters(model)
     print(f"model={args.model} trainable parameters={n_params:,}")
 
@@ -270,6 +275,7 @@ def main() -> None:
 
     history: List[Dict] = []
     best_val_loss, best_epoch, step = float("inf"), -1, 0
+    best_score = float("-inf")  # higher is better; loss is negated so one comparison works for all metrics
     train_start = time.perf_counter()
     for epoch in range(1, args.epochs + 1):
         t0 = time.perf_counter()
@@ -287,12 +293,13 @@ def main() -> None:
               f"val loss {val['loss']:.4f} acc {val['acc']:.4f} auroc {val['auroc']:.4f} | "
               f"{history[-1]['epoch_seconds']:.1f}s")
 
-        if val["loss"] < best_val_loss:
-            best_val_loss, best_epoch = val["loss"], epoch
+        score = -val["loss"] if args.select_metric == "loss" else val[args.select_metric]
+        if score > best_score:
+            best_score, best_val_loss, best_epoch = score, val["loss"], epoch
             torch.save({"model": args.model, "state_dict": model.state_dict(),
                         "epoch": epoch, "args": vars(args)}, out_dir / "best.pt")
         elif args.patience > 0 and epoch - best_epoch >= args.patience:
-            print(f"early stopping: no val-loss improvement for {args.patience} epochs")
+            print(f"early stopping: no val-{args.select_metric} improvement for {args.patience} epochs")
             break
     train_seconds = time.perf_counter() - train_start
     peak_vram_mb = torch.cuda.max_memory_allocated() / 2**20 if device.type == "cuda" else None
