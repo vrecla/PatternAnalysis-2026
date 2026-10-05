@@ -177,20 +177,40 @@ def assert_no_leakage(**splits: Sequence[Sample]) -> None:
 # --------------------------------------------------------------------------
 # Transforms and Dataset
 # --------------------------------------------------------------------------
-def get_transforms(train: bool, img_size: int = 224) -> Callable:
+def get_transforms(train: bool, img_size: int = 224, aug: str = "mild") -> Callable:
     """Image transforms. Augmentation is applied to the training split only.
 
-    Augmentations are deliberately mild: brain MRIs are roughly aligned, so
-    large rotations or flips could change anatomy and hurt more than help.
-    Left-right flips are omitted because hemispheric asymmetry can matter.
+    ``aug="mild"`` (default): small affine jitter and brightness/contrast change.
+    Brain MRIs are roughly aligned, so large rotations or flips could change
+    anatomy and hurt more than help. Left-right flips are omitted because
+    hemispheric asymmetry can matter.
+
+    ``aug="strong"``: for the overfitting seen on the subject-level split. Adds a
+    random crop-and-resize, a larger affine jitter, stronger intensity jitter,
+    slight blur and random erasing (to stop the model relying on one local region).
+    Still no flips.
     """
-    ops: List[Callable] = [T.Grayscale(num_output_channels=1), T.Resize((img_size, img_size))]
-    if train:
+    if aug not in ("mild", "strong"):
+        raise ValueError("aug must be 'mild' or 'strong'")
+    ops: List[Callable] = [T.Grayscale(num_output_channels=1)]
+    if train and aug == "strong":
+        ops += [T.RandomResizedCrop(img_size, scale=(0.75, 1.0), ratio=(0.9, 1.1))]
+    else:
+        ops += [T.Resize((img_size, img_size))]
+    if train and aug == "mild":
         ops += [
             T.RandomAffine(degrees=8, translate=(0.05, 0.05), scale=(0.95, 1.05)),
             T.ColorJitter(brightness=0.15, contrast=0.15),
         ]
+    elif train and aug == "strong":
+        ops += [
+            T.RandomAffine(degrees=12, translate=(0.08, 0.08), scale=(0.9, 1.1)),
+            T.ColorJitter(brightness=0.3, contrast=0.3),
+            T.RandomApply([T.GaussianBlur(kernel_size=5, sigma=(0.1, 1.5))], p=0.3),
+        ]
     ops += [T.ToTensor(), T.Normalize(mean=[0.5], std=[0.5])]
+    if train and aug == "strong":
+        ops += [T.RandomErasing(p=0.25, scale=(0.02, 0.12), value=0.0)]
     return T.Compose(ops)
 
 
@@ -232,6 +252,7 @@ def get_datasets(
     group_by: str = "subject",
     meta_path: Optional[str] = None,
     drop_test_overlap: bool = False,
+    aug: str = "mild",
 ) -> Tuple[ADNIDataset, ADNIDataset, ADNIDataset]:
     """Build leakage-checked (train, val, test) datasets.
 
@@ -268,7 +289,7 @@ def get_datasets(
     train, val = patient_level_split(all_train, val_fraction, seed)
     assert_no_leakage(train=train, val=val, test=test)
     return (
-        ADNIDataset(train, get_transforms(True, img_size)),
+        ADNIDataset(train, get_transforms(True, img_size, aug)),
         ADNIDataset(val, get_transforms(False, img_size)),
         ADNIDataset(test, get_transforms(False, img_size)),
     )
