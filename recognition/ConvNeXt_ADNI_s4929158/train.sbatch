@@ -7,6 +7,11 @@
 #     mkdir -p logs
 #     sbatch train.sbatch mlp cnn convnext      # any subset, run in order
 #
+# Runs use the subject-level split and drop the subjects that appear in both the
+# official train and test folders from training only (see dataset.py --audit).
+# Results go to runs/<model>_subject so earlier scan-level runs are kept.
+# Override the time limit at submit time if needed, e.g. sbatch --time=02:00:00 ...
+#
 # No --mem line: the cluster nodes report RealMemory=1 MB, so any --mem request
 # is rejected.
 #SBATCH --job-name=adni_train
@@ -24,5 +29,6 @@ cd "$SLURM_SUBMIT_DIR" || exit 1
 
 for MODEL in $MODELS; do
     echo "=== training $MODEL ==="
-    python train.py --model "$MODEL" --num-workers "$SLURM_CPUS_PER_TASK" --amp
+    python train.py --model "$MODEL" --num-workers "$SLURM_CPUS_PER_TASK" --amp \
+        --group-by subject --drop-test-overlap --out-dir "runs/${MODEL}_subject"
 done
