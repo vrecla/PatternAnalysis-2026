@@ -253,6 +253,7 @@ def get_datasets(
     meta_path: Optional[str] = None,
     drop_test_overlap: bool = False,
     aug: str = "mild",
+    allow_test_overlap: bool = False,
 ) -> Tuple[ADNIDataset, ADNIDataset, ADNIDataset]:
     """Build leakage-checked (train, val, test) datasets.
 
@@ -261,9 +262,15 @@ def get_datasets(
     we verify it shares no subjects with train/val. If it does, this raises unless
     ``drop_test_overlap`` is set, which removes the overlapping subjects from the
     TRAINING data only (the test set is never altered).
+
+    ``allow_test_overlap`` is for the ABLATION ONLY: it keeps the subjects that the
+    official folders share, so the train/test leakage can be measured. Train/val
+    are still separated by subject. Results from this mode must be labelled leaky.
     """
     if group_by not in ("subject", "scan"):
         raise ValueError("group_by must be 'subject' or 'scan'")
+    if drop_test_overlap and allow_test_overlap:
+        raise ValueError("drop_test_overlap and allow_test_overlap are mutually exclusive")
     all_train = scan_split(root, "train")
     test = scan_split(root, "test")
 
@@ -276,7 +283,10 @@ def get_datasets(
                   "each is treated as its own subject.")
 
     overlap = patients_of(all_train) & patients_of(test)
-    if overlap:
+    if overlap and allow_test_overlap:
+        print(f"WARNING (ablation): keeping {len(overlap)} {group_by}s shared by the official train and test "
+              "folders. Test results from this run are LEAKY and must be labelled as such.")
+    elif overlap:
         if not drop_test_overlap:
             raise ValueError(
                 f"{len(overlap)} {group_by}s appear in both the official train and test folders. "
@@ -287,7 +297,10 @@ def get_datasets(
         print(f"Removed {before - len(all_train)} training slices ({len(overlap)} {group_by}s shared with the test set).")
 
     train, val = patient_level_split(all_train, val_fraction, seed)
-    assert_no_leakage(train=train, val=val, test=test)
+    if allow_test_overlap:
+        assert_no_leakage(train=train, val=val)  # train/test overlap is deliberate in this mode
+    else:
+        assert_no_leakage(train=train, val=val, test=test)
     return (
         ADNIDataset(train, get_transforms(True, img_size, aug)),
         ADNIDataset(val, get_transforms(False, img_size)),
