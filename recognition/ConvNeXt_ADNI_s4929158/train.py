@@ -117,10 +117,15 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> Dict
     }
 
 
-def train_one_epoch(model, loader, optimizer, scaler, device, step, total_steps, warmup_steps, base_lr, amp, clip):
-    """One pass over the training data. Returns (loss, accuracy, new_global_step)."""
+def train_one_epoch(model, loader, optimizer, scaler, device, step, total_steps, warmup_steps, base_lr, amp, clip,
+                    label_smoothing: float = 0.0):
+    """One pass over the training data. Returns (loss, accuracy, new_global_step).
+
+    Label smoothing applies to the training loss only; validation and test loss
+    stay plain cross-entropy so they remain comparable across runs.
+    """
     model.train()
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
     loss_sum, correct, n = 0.0, 0, 0
     for images, labels, _ in loader:
         images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
@@ -225,6 +230,10 @@ def parse_args() -> argparse.Namespace:
                    help="validation metric used to pick the best epoch and for early stopping")
     p.add_argument("--drop-path", type=float, default=None,
                    help="ConvNeXt stochastic-depth rate (default: model default, 0.1)")
+    p.add_argument("--aug", choices=["mild", "strong"], default="mild", help="training augmentation strength")
+    p.add_argument("--label-smoothing", type=float, default=0.0, help="label smoothing for the training loss")
+    p.add_argument("--convnext-size", choices=["base", "small", "tiny"], default="base",
+                   help="base=(48,96,192,384)/(2,2,6,2) as before; small and tiny are narrower and shallower")
     p.add_argument("--img-size", type=int, default=224)
     p.add_argument("--val-fraction", type=float, default=0.15)
     p.add_argument("--group-by", choices=["subject", "scan"], default="subject",
@@ -251,6 +260,7 @@ def main() -> None:
     train_ds, val_ds, test_ds = get_datasets(
         args.root, args.val_fraction, args.split_seed, args.img_size,
         group_by=args.group_by, meta_path=args.meta, drop_test_overlap=args.drop_test_overlap,
+        aug=args.aug,
     )
     gen = torch.Generator().manual_seed(args.seed)
     common = dict(batch_size=args.batch_size, num_workers=args.num_workers, pin_memory=device.type == "cuda")
@@ -259,7 +269,13 @@ def main() -> None:
     test_loader = DataLoader(test_ds, shuffle=False, **common)
     print(f"device={device} amp={amp} | train={len(train_ds)} val={len(val_ds)} test={len(test_ds)} slices")
 
-    model_kwargs = {"drop_path_rate": args.drop_path} if args.drop_path is not None and args.model == "convnext" else {}
+    model_kwargs = {}
+    if args.model == "convnext":
+        sizes = {"base": None, "small": ((32, 64, 128, 256), (2, 2, 4, 2)), "tiny": ((24, 48, 96, 192), (1, 1, 3, 1))}
+        if sizes[args.convnext_size] is not None:
+            model_kwargs["dims"], model_kwargs["depths"] = sizes[args.convnext_size]
+        if args.drop_path is not None:
+            model_kwargs["drop_path_rate"] = args.drop_path
     model = build_model(args.model, **model_kwargs).to(device)
     n_params = count_parameters(model)
     print(f"model={args.model} trainable parameters={n_params:,}")
@@ -281,7 +297,7 @@ def main() -> None:
         t0 = time.perf_counter()
         tr_loss, tr_acc, step = train_one_epoch(
             model, train_loader, optimizer, scaler, device, step, total_steps,
-            warmup_steps, args.lr, amp, args.clip_grad,
+            warmup_steps, args.lr, amp, args.clip_grad, args.label_smoothing,
         )
         val = evaluate(model, val_loader, device)
         history.append({
@@ -296,7 +312,7 @@ def main() -> None:
         score = -val["loss"] if args.select_metric == "loss" else val[args.select_metric]
         if score > best_score:
             best_score, best_val_loss, best_epoch = score, val["loss"], epoch
-            torch.save({"model": args.model, "state_dict": model.state_dict(),
+            torch.save({"model": args.model, "model_kwargs": model_kwargs, "state_dict": model.state_dict(),
                         "epoch": epoch, "args": vars(args)}, out_dir / "best.pt")
         elif args.patience > 0 and epoch - best_epoch >= args.patience:
             print(f"early stopping: no val-{args.select_metric} improvement for {args.patience} epochs")
