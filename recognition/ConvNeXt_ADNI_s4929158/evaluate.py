@@ -105,7 +105,7 @@ def ensure_val_predictions(run_dir: Path, root_override: Optional[str]) -> Path:
         group_by=a.get("group_by", "scan"), meta_path=a.get("meta"),
         drop_test_overlap=a.get("drop_test_overlap", False),
     )
-    model = build_model(ckpt["model"]).to(device)
+    model = build_model(ckpt["model"], **ckpt.get("model_kwargs", {})).to(device)
     model.load_state_dict(ckpt["state_dict"])
     loader = DataLoader(val_ds, batch_size=128, shuffle=False, num_workers=a.get("num_workers", 4))
     save_test_predictions(evaluate(model, loader, device), val_ds.samples, out)

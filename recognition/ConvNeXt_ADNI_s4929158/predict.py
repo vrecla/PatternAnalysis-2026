@@ -127,7 +127,7 @@ def main() -> None:
         group_by=a.get("group_by", "scan"), meta_path=a.get("meta"),
         drop_test_overlap=a.get("drop_test_overlap", False),
     )
-    model = build_model(ckpt["model"]).to(device)
+    model = build_model(ckpt["model"], **ckpt.get("model_kwargs", {})).to(device)
     model.load_state_dict(ckpt["state_dict"])
     loader = DataLoader(test_ds, batch_size=128, shuffle=False, num_workers=args.num_workers)
     res = evaluate(model, loader, device)
