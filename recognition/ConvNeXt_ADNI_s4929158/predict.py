@@ -1,5 +1,8 @@
 """Run a trained model on the held-out ADNI test set and visualise its predictions.
 
+Author:  Vanessa Recla (s4929158)
+Course:  COMP3710/COMP7710 Pattern Recognition, The University of Queensland, October 2026
+
 Loads a checkpoint written by ``train.py``, classifies every test slice, prints
 the headline results, and saves three figures to ``--out-dir``:
 
@@ -8,8 +11,8 @@ the headline results, and saves three figures to ``--out-dir``:
     confusion_matrix.png   counts and per-class rates
 
 Example:
-    python predict.py --checkpoint runs/convnext_seed0/best.pt
-    python predict.py --checkpoint runs/convnext_seed0/best.pt --temperature 1.7
+    python predict.py --checkpoint runs/convnext_v2_dp/best.pt
+    python predict.py --checkpoint runs/convnext_v2_dp/best.pt --temperature 1.64
 
 ``--temperature`` (optional) applies the temperature fitted by ``evaluate.py`` so the
 shown confidences are calibrated; it never changes which class is predicted.
