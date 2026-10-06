@@ -1,13 +1,19 @@
 """Train, validate and test one model (MLP, CNN or ConvNeXt) on ADNI AD-vs-NC.
 
+Author:  Vanessa Recla (s4929158)
+Course:  COMP3710/COMP7710 Pattern Recognition, The University of Queensland, October 2026
+
 All three models share exactly the same data splits, augmentation, optimiser,
 schedule and epoch budget, so differences in the results come from the
 architecture and not from the training recipe.
 
 Protocol
 --------
-* Train on the patient-level training split; select the best epoch by
-  *validation loss* (the test set is never used for any decision).
+* Train on the patient-level training split; select the best epoch on the
+  validation split only (the test set is never used for any decision). The
+  selection metric is ``--select-metric``: validation loss by default, and
+  validation AUROC for the final models (it needs no decision threshold and is
+  less noisy on a small validation set).
 * After training, reload the best checkpoint and evaluate on the held-out test
   set exactly once. Per-slice test logits are saved so that calibration,
   reject-option and failure-case analysis can be done without re-running the model.
@@ -19,10 +25,15 @@ Outputs (in ``--out-dir``, default ``runs/<model>_seed<seed>``):
     history.csv            per-epoch loss / accuracy / AUROC
     curves.png             loss and metric curves
     test_predictions.csv   per-slice test logits, one row per image
+    val_predictions.csv    per-slice validation logits (used by evaluate.py to fit
+                           temperature scaling and the reject threshold)
     results.json           test metrics, parameter count, peak VRAM, latency, args
 
-Example:
+Examples:
     python train.py --model convnext --epochs 40
+    # final ConvNeXt recipe (clean patient-level split, drop path 0.3, AUROC selection):
+    python train.py --model convnext --amp --group-by subject --drop-test-overlap \\
+        --select-metric auroc --drop-path 0.3 --out-dir runs/convnext_v2_dp
 """
 
 import argparse
