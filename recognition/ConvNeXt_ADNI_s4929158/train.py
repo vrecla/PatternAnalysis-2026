@@ -118,24 +118,38 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> Dict
 
 
 def train_one_epoch(model, loader, optimizer, scaler, device, step, total_steps, warmup_steps, base_lr, amp, clip,
-                    label_smoothing: float = 0.0):
+                    label_smoothing: float = 0.0, mixup_alpha: float = 0.0):
     """One pass over the training data. Returns (loss, accuracy, new_global_step).
 
     Label smoothing applies to the training loss only; validation and test loss
     stay plain cross-entropy so they remain comparable across runs.
+
+    Mixup (Zhang et al., 2018), when ``mixup_alpha`` > 0: each batch is blended with a
+    shuffled copy of itself, lam ~ Beta(alpha, alpha), and the loss is the same blend of
+    the two cross-entropies. Training accuracy is then measured against the label of
+    the image that contributes more, so it is only a rough guide in this mode.
     """
     model.train()
     criterion = nn.CrossEntropyLoss(label_smoothing=label_smoothing)
+    beta = torch.distributions.Beta(mixup_alpha, mixup_alpha) if mixup_alpha > 0 else None
     loss_sum, correct, n = 0.0, 0, 0
     for images, labels, _ in loader:
         images, labels = images.to(device, non_blocking=True), labels.to(device, non_blocking=True)
         lr = base_lr * lr_multiplier(step, total_steps, warmup_steps)
         for group in optimizer.param_groups:
             group["lr"] = lr
+        if beta is not None:
+            lam = float(beta.sample())
+            perm = torch.randperm(images.size(0), device=device)
+            images = lam * images + (1.0 - lam) * images[perm]
+            labels_b = labels[perm]
         optimizer.zero_grad(set_to_none=True)
         with torch.autocast(device_type=device.type, dtype=torch.float16, enabled=amp):
             logits = model(images)
-            loss = criterion(logits, labels)
+            if beta is not None:
+                loss = lam * criterion(logits, labels) + (1.0 - lam) * criterion(logits, labels_b)
+            else:
+                loss = criterion(logits, labels)
         scaler.scale(loss).backward()
         if clip > 0:
             scaler.unscale_(optimizer)
@@ -143,7 +157,8 @@ def train_one_epoch(model, loader, optimizer, scaler, device, step, total_steps,
         scaler.step(optimizer)
         scaler.update()
         loss_sum += loss.item() * labels.numel()
-        correct += (logits.argmax(1) == labels).sum().item()
+        target = labels if (beta is None or lam >= 0.5) else labels_b
+        correct += (logits.argmax(1) == target).sum().item()
         n += labels.numel()
         step += 1
     return loss_sum / n, correct / n, step
@@ -232,8 +247,11 @@ def parse_args() -> argparse.Namespace:
                    help="ConvNeXt stochastic-depth rate (default: model default, 0.1)")
     p.add_argument("--aug", choices=["mild", "strong"], default="mild", help="training augmentation strength")
     p.add_argument("--label-smoothing", type=float, default=0.0, help="label smoothing for the training loss")
-    p.add_argument("--convnext-size", choices=["base", "small", "tiny"], default="base",
-                   help="base=(48,96,192,384)/(2,2,6,2) as before; small and tiny are narrower and shallower")
+    p.add_argument("--convnext-size", choices=["base", "small", "tiny", "large"], default="base",
+                   help="base=(48,96,192,384)/(2,2,6,2) as before; small and tiny are narrower and shallower; "
+                        "large=(96,192,384,768)/(3,3,9,3), the ConvNeXt-Tiny layout, about 28M parameters")
+    p.add_argument("--hflip", action="store_true", help="add random horizontal flips to the training augmentation")
+    p.add_argument("--mixup", type=float, default=0.0, help="mixup alpha (0 disables; 0.2 is a common value)")
     p.add_argument("--img-size", type=int, default=224)
     p.add_argument("--val-fraction", type=float, default=0.15)
     p.add_argument("--group-by", choices=["subject", "scan"], default="subject",
@@ -262,7 +280,7 @@ def main() -> None:
     train_ds, val_ds, test_ds = get_datasets(
         args.root, args.val_fraction, args.split_seed, args.img_size,
         group_by=args.group_by, meta_path=args.meta, drop_test_overlap=args.drop_test_overlap,
-        aug=args.aug, allow_test_overlap=args.allow_test_overlap,
+        aug=args.aug, allow_test_overlap=args.allow_test_overlap, hflip=args.hflip,
     )
     gen = torch.Generator().manual_seed(args.seed)
     common = dict(batch_size=args.batch_size, num_workers=args.num_workers, pin_memory=device.type == "cuda")
@@ -273,7 +291,8 @@ def main() -> None:
 
     model_kwargs = {}
     if args.model == "convnext":
-        sizes = {"base": None, "small": ((32, 64, 128, 256), (2, 2, 4, 2)), "tiny": ((24, 48, 96, 192), (1, 1, 3, 1))}
+        sizes = {"base": None, "small": ((32, 64, 128, 256), (2, 2, 4, 2)), "tiny": ((24, 48, 96, 192), (1, 1, 3, 1)),
+                 "large": ((96, 192, 384, 768), (3, 3, 9, 3))}
         if sizes[args.convnext_size] is not None:
             model_kwargs["dims"], model_kwargs["depths"] = sizes[args.convnext_size]
         if args.drop_path is not None:
@@ -299,7 +318,7 @@ def main() -> None:
         t0 = time.perf_counter()
         tr_loss, tr_acc, step = train_one_epoch(
             model, train_loader, optimizer, scaler, device, step, total_steps,
-            warmup_steps, args.lr, amp, args.clip_grad, args.label_smoothing,
+            warmup_steps, args.lr, amp, args.clip_grad, args.label_smoothing, args.mixup,
         )
         val = evaluate(model, val_loader, device)
         history.append({
