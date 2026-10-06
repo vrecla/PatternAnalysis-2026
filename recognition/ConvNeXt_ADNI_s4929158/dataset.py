@@ -1,5 +1,8 @@
 """Data loading for ADNI AD-vs-NC classification with subject-level splitting.
 
+Author:  Vanessa Recla (s4929158)
+Course:  COMP3710/COMP7710 Pattern Recognition, The University of Queensland, October 2026
+
 Expected on-disk layout (Rangpur: /home/groups/comp3710/ADNI)::
 
     meta_data_with_label.json
