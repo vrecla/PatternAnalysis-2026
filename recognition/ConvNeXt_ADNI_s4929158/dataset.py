@@ -177,7 +177,7 @@ def assert_no_leakage(**splits: Sequence[Sample]) -> None:
 # --------------------------------------------------------------------------
 # Transforms and Dataset
 # --------------------------------------------------------------------------
-def get_transforms(train: bool, img_size: int = 224, aug: str = "mild") -> Callable:
+def get_transforms(train: bool, img_size: int = 224, aug: str = "mild", hflip: bool = False) -> Callable:
     """Image transforms. Augmentation is applied to the training split only.
 
     ``aug="mild"`` (default): small affine jitter and brightness/contrast change.
@@ -197,6 +197,10 @@ def get_transforms(train: bool, img_size: int = 224, aug: str = "mild") -> Calla
         ops += [T.RandomResizedCrop(img_size, scale=(0.75, 1.0), ratio=(0.9, 1.1))]
     else:
         ops += [T.Resize((img_size, img_size))]
+    if train and hflip:
+        # Off by default. AD atrophy is largely bilateral, so flips may be safe; this is an
+        # experiment, so it is switched on explicitly (train.py --hflip) and reported.
+        ops += [T.RandomHorizontalFlip(p=0.5)]
     if train and aug == "mild":
         ops += [
             T.RandomAffine(degrees=8, translate=(0.05, 0.05), scale=(0.95, 1.05)),
@@ -254,6 +258,7 @@ def get_datasets(
     drop_test_overlap: bool = False,
     aug: str = "mild",
     allow_test_overlap: bool = False,
+    hflip: bool = False,
 ) -> Tuple[ADNIDataset, ADNIDataset, ADNIDataset]:
     """Build leakage-checked (train, val, test) datasets.
 
@@ -302,7 +307,7 @@ def get_datasets(
     else:
         assert_no_leakage(train=train, val=val, test=test)
     return (
-        ADNIDataset(train, get_transforms(True, img_size, aug)),
+        ADNIDataset(train, get_transforms(True, img_size, aug, hflip)),
         ADNIDataset(val, get_transforms(False, img_size)),
         ADNIDataset(test, get_transforms(False, img_size)),
     )
