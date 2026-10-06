@@ -11,6 +11,17 @@ Reads the per-slice logits written by ``train.py`` (``test_predictions.csv`` and
     failure_cases.png      the selected failure cases, with images
     failure_cases.csv      the selected failure cases with their statistics
 
+Optional extras (all off unless requested):
+
+    --ensemble NAME RUN [RUN ...]   average the logits of several runs (e.g. three seeds)
+                                    and score the average as one more model; also reports
+                                    the mean +/- std of the individual runs. Repeatable.
+    --intensity-baseline            logistic regression on three global image statistics,
+                                    as a sanity baseline for shortcut cues (needs the dataset)
+    --bootstrap B                   patient-level bootstrap confidence intervals for
+                                    accuracy and AUROC, plus paired differences against
+                                    --reference (default: the focus model)
+
 Protocol notes
 --------------
 * Everything is per slice (each image counted separately), as recommended for a
@@ -27,6 +38,12 @@ Protocol notes
 Example:
     python evaluate.py --runs runs/mlp_seed0 runs/cnn_seed0 runs/convnext_seed0 \
         --names MLP CNN ConvNeXt --focus ConvNeXt
+
+    python evaluate.py --runs runs/mlp_seed0 runs/cnn_seed0 runs/convnext_seed0 \
+        --names MLP CNN ConvNeXt --focus ConvNeXt \
+        --ensemble "CNN x3" runs/cnn_seed0 runs/cnn_seed1 runs/cnn_seed2 \
+        --ensemble "ConvNeXt x3" runs/convnext_seed0 runs/convnext_seed1 runs/convnext_seed2 \
+        --intensity-baseline --bootstrap 1000
 """
 
 import argparse
@@ -43,6 +60,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from PIL import Image
 from scipy.optimize import minimize_scalar
+from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import balanced_accuracy_score, confusion_matrix, precision_recall_fscore_support, roc_auc_score
 
 CLASS_NAMES = {0: "NC", 1: "AD"}
@@ -249,12 +267,135 @@ def patient_error_rate(data: Dict, preds: np.ndarray) -> Dict[str, float]:
 
 
 # --------------------------------------------------------------------------
+# Optional extras: ensembles, intensity baseline, patient-level bootstrap
+# --------------------------------------------------------------------------
+_RESOURCE_KEYS = ("trainable_params", "peak_train_vram_mb", "latency_ms_batch1",
+                  "throughput_img_per_s_batch64", "train_seconds")
+
+
+def ensemble_resources(parts: List[Dict]) -> Dict:
+    """Cost of running every member: parameters, latency and training time add up."""
+    if not all(all(k in r and r[k] is not None for k in _RESOURCE_KEYS) for r in parts):
+        return {}
+    return {
+        "trainable_params": int(sum(r["trainable_params"] for r in parts)),
+        "peak_train_vram_mb": max(r["peak_train_vram_mb"] for r in parts),  # members are trained one at a time
+        "latency_ms_batch1": sum(r["latency_ms_batch1"] for r in parts),
+        "throughput_img_per_s_batch64": 1.0 / sum(1.0 / r["throughput_img_per_s_batch64"] for r in parts),
+        "train_seconds": sum(r["train_seconds"] for r in parts),
+        "best_epoch": "mixed",
+    }
+
+
+def make_ensemble(members: List[Dict]):
+    """Average the logits of runs that were scored on identical test and validation rows.
+
+    ``members`` holds dicts with keys ``test``, ``val`` and ``res``. The runs must
+    share the data split (same ``--split-seed`` and data flags); otherwise the rows
+    differ and this raises instead of silently mixing up slices.
+    """
+    t0, v0 = members[0]["test"], members[0]["val"]
+    for m in members[1:]:
+        if not (np.array_equal(m["test"]["path"], t0["path"]) and np.array_equal(m["val"]["path"], v0["path"])):
+            raise SystemExit("ensemble members were not scored on the same test/validation rows "
+                             "(different split or data flags); refusing to average them")
+    test = dict(t0, logits=np.mean([m["test"]["logits"] for m in members], axis=0))
+    val = dict(v0, logits=np.mean([m["val"]["logits"] for m in members], axis=0))
+    return test, val, ensemble_resources([m["res"] for m in members])
+
+
+def fit_intensity_baseline(train_paths, train_labels, val_paths, test_paths):
+    """Logistic regression on global image statistics (mean intensity, contrast, foreground).
+
+    A sanity baseline: if three numbers that ignore anatomy already separate AD from NC,
+    a deep model can reach part of its accuracy through that shortcut. Returns two-class
+    logits (val, test) shaped like a network's output, so every table treats it as a model.
+    """
+    from sklearn.preprocessing import StandardScaler
+
+    def feats(paths):
+        s = [image_stats(str(p)) for p in paths]
+        return np.array([[d["mean_intensity"], d["contrast_std"], d["foreground_frac"]] for d in s])
+
+    scaler = StandardScaler().fit(feats(train_paths))
+    clf = LogisticRegression(max_iter=1000).fit(scaler.transform(feats(train_paths)), np.asarray(train_labels))
+
+    def logits(paths):
+        z = clf.decision_function(scaler.transform(feats(paths)))
+        return np.stack([-z / 2, z / 2], axis=1)  # softmax of this is sigmoid(z)
+
+    return logits(val_paths), logits(test_paths)
+
+
+def train_paths_from_run(run_dir: Path, root_override: Optional[str]):
+    """Training-set image paths and labels of the split that ``run_dir`` was trained on."""
+    import torch
+
+    from dataset import get_datasets
+
+    a = torch.load(run_dir / "best.pt", map_location="cpu", weights_only=True)["args"]
+    train_ds, _, _ = get_datasets(
+        root_override or a["root"], a["val_fraction"], a["split_seed"], a["img_size"],
+        group_by=a.get("group_by", "scan"), meta_path=a.get("meta"),
+        drop_test_overlap=a.get("drop_test_overlap", False),
+        allow_test_overlap=a.get("allow_test_overlap", False),
+    )
+    return [s.path for s in train_ds.samples], [s.label for s in train_ds.samples]
+
+
+def patient_bootstrap(tests: Dict[str, Dict], names: List[str], reference: str, n_boot: int, seed: int = 0) -> Dict:
+    """Patient-level (cluster) bootstrap of accuracy and AUROC, with paired differences.
+
+    Slices from one patient are strongly correlated (many patients are wrong on almost
+    every slice), so resampling single slices would give confidence intervals that are
+    far too narrow. Here whole patients are resampled with replacement, and every model
+    is scored on the same resamples so differences between models are paired.
+    """
+    base = tests[names[0]]
+    labels = base["label"]
+    _, inv = np.unique(base["patient"], return_inverse=True)
+    members = [np.where(inv == k)[0] for k in range(inv.max() + 1)]
+    p_ad = {n: softmax(tests[n]["logits"])[:, 1] for n in names}
+    correct = {n: tests[n]["logits"].argmax(axis=1) == labels for n in names}
+    rng = np.random.default_rng(seed)
+    acc = {n: np.empty(n_boot) for n in names}
+    auc = {n: np.empty(n_boot) for n in names}
+    for b in range(n_boot):
+        pick = rng.integers(0, len(members), len(members))
+        idx = np.concatenate([members[k] for k in pick])
+        y = labels[idx]
+        for n in names:
+            acc[n][b] = correct[n][idx].mean()
+            auc[n][b] = roc_auc_score(y, p_ad[n][idx])
+
+    def ci(x):
+        lo, hi = np.percentile(x, [2.5, 97.5])
+        return float(lo), float(hi)
+
+    def pval(d):  # two-sided bootstrap p-value for "difference is zero"
+        return float(min(1.0, 2 * min((d <= 0).mean(), (d >= 0).mean())))
+
+    out = {"n_boot": n_boot, "n_patients": len(members), "reference": reference, "models": {}, "paired": {}}
+    for n in names:
+        out["models"][n] = {"accuracy_ci": ci(acc[n]), "auroc_ci": ci(auc[n])}
+        if n != reference:
+            da, du = acc[n] - acc[reference], auc[n] - auc[reference]
+            out["paired"][n] = {"d_accuracy": float(da.mean()), "d_accuracy_ci": ci(da), "d_accuracy_p": pval(da),
+                                "d_auroc": float(du.mean()), "d_auroc_ci": ci(du), "d_auroc_p": pval(du)}
+    return out
+
+
+# --------------------------------------------------------------------------
 # Plots
 # --------------------------------------------------------------------------
 def plot_reliability(results: Dict, path: Path) -> None:
     names = list(results)
-    fig, axes = plt.subplots(1, len(names), figsize=(4.6 * len(names), 4.4), squeeze=False, facecolor=SURFACE)
-    for ax, (i, name) in zip(axes[0], enumerate(names)):
+    ncols = min(3, len(names))
+    nrows = int(np.ceil(len(names) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.6 * ncols, 4.4 * nrows), squeeze=False, facecolor=SURFACE)
+    for ax in axes.ravel()[len(names):]:  # hide unused panels
+        ax.axis("off")
+    for ax, (i, name) in zip(axes.ravel(), enumerate(names)):
         r = results[name]
         style_axes(ax)
         ax.plot([0.5, 1], [0.5, 1], color=INK2, linestyle=":", linewidth=1, label="perfect calibration")
@@ -275,7 +416,9 @@ def plot_risk_coverage(results: Dict, target_risk: float, path: Path) -> None:
     fig, ax = plt.subplots(figsize=(6.4, 4.6), facecolor=SURFACE)
     style_axes(ax)
     for i, (name, r) in enumerate(results.items()):
-        ax.plot(r["rc_coverage"], r["rc_risk"], color=SERIES[i % 3], linewidth=2, label=name)
+        # colour repeats every 3 models, so the line style also changes to keep lines distinguishable
+        ax.plot(r["rc_coverage"], r["rc_risk"], color=SERIES[i % 3], linewidth=2,
+                linestyle=("-", "--", ":")[(i // 3) % 3], label=name)
         op = r["reject_test"]
         if op["risk"] is not None:
             ax.plot(op["coverage"], op["risk"], marker="o", markersize=9, color=SERIES[i % 3],
@@ -348,23 +491,69 @@ def main() -> None:
     ap.add_argument("--target-risk", type=float, default=0.10, help="reject option: max error rate among accepted slices")
     ap.add_argument("--n-cases", type=int, default=5, help="number of failure cases (3-5)")
     ap.add_argument("--root", default=None, help="dataset root override when regenerating val logits")
+    ap.add_argument("--ensemble", nargs="+", action="append", default=[], metavar=("NAME", "RUN"),
+                    help="NAME RUN [RUN ...]: score the logit average of these runs as one more model (repeatable)")
+    ap.add_argument("--intensity-baseline", action="store_true",
+                    help="add a logistic-regression baseline on global image statistics (needs the dataset)")
+    ap.add_argument("--bootstrap", type=int, default=0, metavar="B",
+                    help="patient-level bootstrap resamples for confidence intervals (0 = off; 1000 is typical)")
+    ap.add_argument("--reference", default=None, help="model the paired bootstrap differences are taken against (default: focus)")
     args = ap.parse_args()
 
     run_dirs = [Path(r) for r in args.runs]
-    names = args.names or [d.name for d in run_dirs]
-    if len(names) != len(run_dirs):
+    run_names = args.names or [d.name for d in run_dirs]
+    if len(run_names) != len(run_dirs):
         raise SystemExit("--names must match --runs in length")
-    focus = args.focus or names[-1]
+    names = list(run_names)
+    focus = args.focus or run_names[-1]  # chosen before ensembles / baseline are appended
     if focus not in names:
         raise SystemExit(f"--focus must be one of {names}")
     out = Path(args.out_dir)
     out.mkdir(parents=True, exist_ok=True)
 
+    cache: Dict[str, Dict] = {}  # run directory -> {"test", "val", "res"}; shared by --runs and --ensemble
+
+    def load_run(d: Path) -> Dict:
+        key = str(d)
+        if key not in cache:
+            cache[key] = {
+                "test": load_predictions(d / "test_predictions.csv"),
+                "val": load_predictions(ensure_val_predictions(d, args.root)),
+                "res": json.load(open(d / "results.json")) if (d / "results.json").exists() else {},
+            }
+        return cache[key]
+
     tests, vals, resources = {}, {}, {}
     for name, d in zip(names, run_dirs):
-        tests[name] = load_predictions(d / "test_predictions.csv")
-        vals[name] = load_predictions(ensure_val_predictions(d, args.root))
-        resources[name] = json.load(open(d / "results.json")) if (d / "results.json").exists() else {}
+        r = load_run(d)
+        tests[name], vals[name], resources[name] = r["test"], r["val"], r["res"]
+
+    seed_stats: Dict[str, Dict] = {}  # per ensemble: metrics of the individual members
+    for spec in args.ensemble:
+        if len(spec) < 3:
+            raise SystemExit("--ensemble needs a NAME and at least two runs")
+        ens_name, member_dirs = spec[0], [Path(p) for p in spec[1:]]
+        if ens_name in names:
+            raise SystemExit(f"ensemble name '{ens_name}' clashes with another model name")
+        members = [load_run(d) for d in member_dirs]
+        tests[ens_name], vals[ens_name], resources[ens_name] = make_ensemble(members)
+        per = [classification_metrics(m["test"]["label"], m["test"]["logits"]) for m in members]
+        seed_stats[ens_name] = {
+            "runs": [str(d) for d in member_dirs],
+            "accuracy": [p["accuracy"] for p in per], "auroc": [p["auroc"] for p in per],
+        }
+        names.append(ens_name)
+
+    if args.intensity_baseline:
+        print("fitting the intensity-only baseline (reads every training image once) ...")
+        first_t, first_v = tests[run_names[0]], vals[run_names[0]]
+        tr_paths, tr_labels = train_paths_from_run(run_dirs[0], args.root)
+        v_logits, t_logits = fit_intensity_baseline(tr_paths, tr_labels, first_v["path"], first_t["path"])
+        tests["Intensity-only"] = dict(first_t, logits=t_logits)
+        vals["Intensity-only"] = dict(first_v, logits=v_logits)
+        resources["Intensity-only"] = {}
+        names.append("Intensity-only")
+
     first = tests[names[0]]
     for n in names[1:]:  # all models must be scored on the same rows in the same order
         assert np.array_equal(tests[n]["path"], first["path"]), f"{n}: test rows differ from {names[0]}"
@@ -391,6 +580,14 @@ def main() -> None:
 
     plot_reliability(results, out / "reliability.png")
     plot_risk_coverage(results, args.target_risk, out / "risk_coverage.png")
+
+    boot = None
+    if args.bootstrap > 0:
+        reference = args.reference or focus
+        if reference not in names:
+            raise SystemExit(f"--reference must be one of {names}")
+        print(f"patient-level bootstrap: {args.bootstrap} resamples x {len(names)} models ...")
+        boot = patient_bootstrap(tests, names, reference, args.bootstrap)
 
     # ---- failure cases for the focus model (calibrated confidences) ----
     ft = tests[focus]
@@ -464,6 +661,33 @@ def main() -> None:
         thr = "none reachable" if r["reject_threshold"] is None else f"{r['reject_threshold']:.3f}"
         L.append(f"| {n} | {thr} | {fmt(r['reject_test']['coverage'], pct=True)} | {fmt(r['reject_test']['risk'], pct=True)} | "
                  f"{fmt(r['risk_at_80_coverage'], pct=True)} | {fmt(r['aurc'])} |")
+    if seed_stats:
+        L += ["", "## Seed variability and ensembles", "",
+              "Mean +/- std over the individual runs (test, per slice; std is the sample std over runs), next to the "
+              "logit-average ensemble of the same runs. Differences smaller than the std are not evidence of a real effect.", "",
+              "| Group | Runs | Accuracy (runs) | AUROC (runs) | Accuracy (ensemble) | AUROC (ensemble) |", "|---|---|---|---|---|---|"]
+        for n, s in seed_stats.items():
+            acc, auc = np.array(s["accuracy"]), np.array(s["auroc"])
+            sd = (lambda x: x.std(ddof=1) if len(x) > 1 else float("nan"))
+            m = results[n]["test"]
+            L.append(f"| {n} | {len(acc)} | {acc.mean():.3f} +/- {sd(acc):.3f} | {auc.mean():.3f} +/- {sd(auc):.3f} | "
+                     f"{fmt(m['accuracy'])} | {fmt(m['auroc'])} |")
+        L += [""] + [f"- {n}: " + ", ".join(s["runs"]) for n, s in seed_stats.items()]
+    if boot is not None:
+        L += ["", f"## Uncertainty: patient-level bootstrap ({boot['n_boot']} resamples of {boot['n_patients']} test patients)", "",
+              "Whole patients are resampled, not single slices, because errors cluster by patient; slice-level intervals would be far too narrow. "
+              "Intervals are 95% percentile intervals.", "",
+              "| Model | Accuracy [95% CI] | AUROC [95% CI] |", "|---|---|---|"]
+        for n in names:
+            m, b = results[n]["test"], boot["models"][n]
+            L.append(f"| {n} | {m['accuracy']:.3f} [{b['accuracy_ci'][0]:.3f}, {b['accuracy_ci'][1]:.3f}] | "
+                     f"{m['auroc']:.3f} [{b['auroc_ci'][0]:.3f}, {b['auroc_ci'][1]:.3f}] |")
+        L += ["", f"Paired difference against **{boot['reference']}** (model minus reference, same resamples; "
+                  "p = two-sided bootstrap p-value for a difference of zero, not corrected for the number of comparisons):", "",
+              "| Model | Δ accuracy [95% CI] | p | Δ AUROC [95% CI] | p |", "|---|---|---|---|---|"]
+        for n, d in boot["paired"].items():
+            L.append(f"| {n} | {d['d_accuracy']:+.3f} [{d['d_accuracy_ci'][0]:+.3f}, {d['d_accuracy_ci'][1]:+.3f}] | {d['d_accuracy_p']:.3f} | "
+                     f"{d['d_auroc']:+.3f} [{d['d_auroc_ci'][0]:+.3f}, {d['d_auroc_ci'][1]:+.3f}] | {d['d_auroc_p']:.3f} |")
     L += ["", "## Resources", "", "| Model | Params | Peak train VRAM (MB) | Latency (ms/img, batch 1) | Throughput (img/s, batch 64) | Train time (min) | Best epoch |",
           "|---|---|---|---|---|---|---|"]
     for n in names:
@@ -502,7 +726,8 @@ def main() -> None:
         return o
     with open(out / "metrics.json", "w") as f:
         json.dump(clean({"models": results, "focus": focus, "systematic": systematic, "slice_error": slice_rows,
-                         "failure_cases": cases, "target_risk": args.target_risk}), f, indent=2)
+                         "failure_cases": cases, "target_risk": args.target_risk,
+                         "seed_stats": seed_stats, "bootstrap": boot}), f, indent=2)
     print(text)
     print(f"figures and tables written to {out}/")
 
