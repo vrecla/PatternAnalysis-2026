@@ -1,5 +1,8 @@
 """Model components for ADNI AD-vs-NC classification.
 
+Author:  Vanessa Recla (s4929158)
+Course:  COMP3710/COMP7710 Pattern Recognition, The University of Queensland, October 2026
+
 Contains three models used in the benchmark progression MLP -> CNN -> ConvNeXt:
 
 * ``MLPBaseline``  - fully connected network on a downsampled image.
@@ -23,6 +26,10 @@ ConvNeXt design elements retained from the paper:
 Reduction versus the paper's ConvNeXt-T (96/192/384/768 channels, depths 3-3-9-3):
 fewer channels and blocks so it trains from scratch on a modest medical dataset
 within Rangpur time limits. The architecture, not the size, is what is kept.
+
+References:
+  Z. Liu et al., "A ConvNet for the 2020s", CVPR 2022 (ConvNeXt).
+  G. Huang et al., "Deep Networks with Stochastic Depth", ECCV 2016 (DropPath).
 """
 
 from typing import Sequence
