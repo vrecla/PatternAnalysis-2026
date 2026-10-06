@@ -1,5 +1,8 @@
 """Compare trained models: metrics, calibration, reject option and failure-case evidence.
 
+Author:  Vanessa Recla (s4929158)
+Course:  COMP3710/COMP7710 Pattern Recognition, The University of Queensland, October 2026
+
 Reads the per-slice logits written by ``train.py`` (``test_predictions.csv`` and
 ``val_predictions.csv`` in each run directory) and produces, in ``--out-dir``:
 
