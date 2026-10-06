@@ -26,6 +26,7 @@ Example:
 """
 
 import argparse
+import copy
 import csv
 import json
 import math
@@ -117,8 +118,32 @@ def evaluate(model: nn.Module, loader: DataLoader, device: torch.device) -> Dict
     }
 
 
+class ModelEMA:
+    """Exponential moving average of the model weights (Polyak averaging).
+
+    After every optimiser step each parameter p_ema <- d * p_ema + (1 - d) * p, so the
+    averaged copy changes smoothly instead of jumping with every noisy update. Validation
+    and the saved checkpoint use this averaged copy. d ramps up from a small value so the
+    average is not dominated by the random initial weights.
+    """
+
+    def __init__(self, model: nn.Module, decay: float):
+        self.decay = decay
+        self.module = copy.deepcopy(model).eval()
+        for p in self.module.parameters():
+            p.requires_grad_(False)
+
+    @torch.no_grad()
+    def update(self, model: nn.Module, step: int) -> None:
+        d = min(self.decay, (1.0 + step) / (10.0 + step))
+        for p_ema, p in zip(self.module.parameters(), model.parameters()):
+            p_ema.mul_(d).add_(p.detach(), alpha=1.0 - d)
+        for b_ema, b in zip(self.module.buffers(), model.buffers()):
+            b_ema.copy_(b)  # e.g. BatchNorm running statistics are copied, not averaged
+
+
 def train_one_epoch(model, loader, optimizer, scaler, device, step, total_steps, warmup_steps, base_lr, amp, clip,
-                    label_smoothing: float = 0.0, mixup_alpha: float = 0.0):
+                    label_smoothing: float = 0.0, mixup_alpha: float = 0.0, ema=None):
     """One pass over the training data. Returns (loss, accuracy, new_global_step).
 
     Label smoothing applies to the training loss only; validation and test loss
@@ -156,6 +181,8 @@ def train_one_epoch(model, loader, optimizer, scaler, device, step, total_steps,
             nn.utils.clip_grad_norm_(model.parameters(), clip)
         scaler.step(optimizer)
         scaler.update()
+        if ema is not None:
+            ema.update(model, step)
         loss_sum += loss.item() * labels.numel()
         target = labels if (beta is None or lam >= 0.5) else labels_b
         correct += (logits.argmax(1) == target).sum().item()
@@ -250,6 +277,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--convnext-size", choices=["base", "small", "tiny", "large"], default="base",
                    help="base=(48,96,192,384)/(2,2,6,2) as before; small and tiny are narrower and shallower; "
                         "large=(96,192,384,768)/(3,3,9,3), the ConvNeXt-Tiny layout, about 28M parameters")
+    p.add_argument("--ema", type=float, default=0.0,
+                   help="EMA decay for the weights used in validation and the saved checkpoint (0 disables; try 0.998)")
+    p.add_argument("--select-smooth", type=int, default=1,
+                   help="pick the best epoch by the mean of the selection metric over the last N epochs (1 = off)")
     p.add_argument("--hflip", action="store_true", help="add random horizontal flips to the training augmentation")
     p.add_argument("--mixup", type=float, default=0.0, help="mixup alpha (0 disables; 0.2 is a common value)")
     p.add_argument("--img-size", type=int, default=224)
@@ -302,6 +333,8 @@ def main() -> None:
     print(f"model={args.model} trainable parameters={n_params:,}")
 
     optimizer = torch.optim.AdamW(make_param_groups(model, args.weight_decay), lr=args.lr)
+    ema = ModelEMA(model, args.ema) if args.ema > 0 else None
+    eval_model = ema.module if ema is not None else model  # the weights that get validated and saved
     scaler = torch.amp.GradScaler("cuda", enabled=amp)
     steps_per_epoch = len(train_loader)
     total_steps = args.epochs * steps_per_epoch
@@ -313,14 +346,15 @@ def main() -> None:
     history: List[Dict] = []
     best_val_loss, best_epoch, step = float("inf"), -1, 0
     best_score = float("-inf")  # higher is better; loss is negated so one comparison works for all metrics
+    recent_scores: List[float] = []  # raw per-epoch scores, for --select-smooth
     train_start = time.perf_counter()
     for epoch in range(1, args.epochs + 1):
         t0 = time.perf_counter()
         tr_loss, tr_acc, step = train_one_epoch(
             model, train_loader, optimizer, scaler, device, step, total_steps,
-            warmup_steps, args.lr, amp, args.clip_grad, args.label_smoothing, args.mixup,
+            warmup_steps, args.lr, amp, args.clip_grad, args.label_smoothing, args.mixup, ema,
         )
-        val = evaluate(model, val_loader, device)
+        val = evaluate(eval_model, val_loader, device)
         history.append({
             "epoch": epoch, "train_loss": tr_loss, "train_acc": tr_acc,
             "val_loss": val["loss"], "val_acc": val["acc"], "val_auroc": val["auroc"],
@@ -330,10 +364,12 @@ def main() -> None:
               f"val loss {val['loss']:.4f} acc {val['acc']:.4f} auroc {val['auroc']:.4f} | "
               f"{history[-1]['epoch_seconds']:.1f}s")
 
-        score = -val["loss"] if args.select_metric == "loss" else val[args.select_metric]
+        recent_scores.append(-val["loss"] if args.select_metric == "loss" else val[args.select_metric])
+        window = recent_scores[-max(args.select_smooth, 1):]
+        score = sum(window) / len(window)  # equals the raw score when --select-smooth is 1
         if score > best_score:
             best_score, best_val_loss, best_epoch = score, val["loss"], epoch
-            torch.save({"model": args.model, "model_kwargs": model_kwargs, "state_dict": model.state_dict(),
+            torch.save({"model": args.model, "model_kwargs": model_kwargs, "state_dict": eval_model.state_dict(),
                         "epoch": epoch, "args": vars(args)}, out_dir / "best.pt")
         elif args.patience > 0 and epoch - best_epoch >= args.patience:
             print(f"early stopping: no val-{args.select_metric} improvement for {args.patience} epochs")
