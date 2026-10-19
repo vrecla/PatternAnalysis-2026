@@ -1,1 +1,8 @@
+*.pt
+*.pth
+*.ckpt
+runs/**/*.pt
+logs/
+__pycache__/
+*.pyc
 runs/**/*_predictions.csv
