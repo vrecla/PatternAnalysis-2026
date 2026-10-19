@@ -3,6 +3,9 @@
 COMP3710/COMP7710 Pattern Recognition, individual project (Hard difficulty). Student: s4929158.
 
 ## 1. Overview
+**Problem.** Classify 2D slices of T1-weighted brain MRI as Alzheimer's Disease (AD, label 1) or cognitively normal (NC, label 0), using the course copy of ADNI. The engineering question is not only accuracy: does the model's confidence mean anything on ambiguous cases, and can a reject option safely route uncertain cases to a human reviewer?
+
+**Algorithm.** A hand-built, reduced ConvNeXt (Liu et al., 2022) trained from scratch. It keeps ConvNeXt's core design: a patchify stem, 7x7 depthwise convolutions, inverted-bottleneck MLP blocks, LayerNorm, layer scale, stochastic depth and separate downsampling layers. Dimensions (48, 96, 192, 384), depths (2, 2, 6, 2), stochastic-depth rate 0.3, 4,832,018 parameters. No pretrained weights are used. Two baselines are trained on identical splits: an MLP (590,722 parameters) and a small CNN with BatchNorm (1,173,154 parameters).
 
 ## 2. Feasibility review
 **1. User need, scope and acceptance criteria.**
