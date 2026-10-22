@@ -43,6 +43,13 @@ Python 3.11.13 with matplotlib 3.11.2, numpy 2.4.6, pillow 12.3.0, scikit-learn 
 - Using `meta_data_with_label.json`, I found that each prefix maps to a raw file name that contains an ADNI subject ID and ends in the same number as the prefix (for example prefix `1221051` maps to `ADNI_002_S_0413_..._I1221051.nii`, so the prefix is the ADNI image ID of one scan), and that one subject has 1 to 8 scans with different prefixes. Under that mapping 216 of the 680 subjects appear in both folders: subject `002_S_0413` has scan 863056 in train and scan 1221051 in test, and subject `002_S_1261` has scans 831065 and 989320 in train and scan 1270020 in test. Both settings are reported: the clean split (shared subjects removed from training; the main result) and the as-provided folders with shared subjects kept (Section 5.4, labelled "leaky" there because the shared subjects mean the test patients were also seen in training).
 - Label and acquisition-year confound: the raw file names in the metadata carry a timestamp that I take to be the acquisition date (ADNI naming). Counting scans by that year and label gives the table below. In the training folder the year separates the classes perfectly, so a model can learn scan era (scanner or protocol appearance) instead of disease. The test folder breaks the pattern: all 227 NC scans are from 2019 to 2021, but so are about 88 of the AD scans, and every AD scan from 2017 onwards is in the test folder only. No split of the training folder can remove this, because training contains no AD scans from the later era. Section 5.3 measures its effect.
 
+| Acquisition year | 2011 | 2012 | 2013 | 2014 | 2015 | 2017 | 2018 | 2019 | 2020 | 2021 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Train scans (AD share) | 57 (1.00) | 253 (1.00) | 210 (1.00) | 0 | 0 | 153 (0.00) | 292 (0.00) | 89 (0.00) | 17 (0.00) | 5 (0.00) |
+| Test scans (AD share) | 0 | 0 | 54 (1.00) | 45 (1.00) | 4 (1.00) | 5 (1.00) | 28 (1.00) | 147 (0.33) | 133 (0.20) | 34 (0.35) |
+
+- Reporting: all accuracies are per slice (each image counted separately). Patient-level accuracy is a supplementary figure only: it needs an extra aggregation rule that the task does not specify, and I use the mean of a patient's slice probabilities, thresholded at 0.5.
+
 ## 5. Results
 
 ## 6. Open research dilemma
