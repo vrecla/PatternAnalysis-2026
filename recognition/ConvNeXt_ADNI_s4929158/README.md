@@ -11,6 +11,12 @@ COMP3710/COMP7710 Pattern Recognition, individual project (Hard difficulty). Stu
 
 **Headline result (clean, patient-level split; per slice, official test folder).** ConvNeXt reaches **0.693 +/- 0.005 test accuracy** and AUROC 0.762 +/- 0.010 over three training seeds. This is below the 0.80 Hard-tier target. The CNN baseline is as accurate (0.703 +/- 0.025) and has a higher AUROC (0.796 +/- 0.009). ConvNeXt is better calibrated and more sensitive to AD. The aggregate accuracy also hides a data problem: in the training folder every AD scan was acquired in 2011 to 2013 and every NC scan in 2017 to 2021, so a rule that looks only at the acquisition year scores 0.733 on the test set. Inside the 2019 to 2021 test scans, where the year cannot give the answer away, ConvNeXt reaches an AUROC of 0.682 and AD recall of 0.51. Details and caveats are in Sections 5 and 6.
 
+**Figures.** Training curves: `runs/convnext_v2_dp/curves.png` (also `runs/cnn_auroc/curves.png`, `runs/mlp_auroc/curves.png`). Example predictions: `predictions/convnext_v2_dp/predictions_grid.png`.
+
+![ConvNeXt training curves](runs/convnext_v2_dp/curves.png)
+![Example test predictions](predictions/convnext_v2_dp/predictions_grid.png)
+
+
 ## 2. Feasibility review
 **1. User need, scope and acceptance criteria.**
 *User:* a clinical reviewer who wants an assistant that auto-classifies clear cases and routes uncertain ones to an expert. *Prototype:* 2D slice-level AD vs NC classifier with calibrated confidence and a reject option; not a diagnostic tool. *Acceptance criteria (testable):*
