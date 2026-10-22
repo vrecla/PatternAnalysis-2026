@@ -57,7 +57,52 @@ Python 3.11.13 with matplotlib 3.11.2, numpy 2.4.6, pillow 12.3.0, scikit-learn 
 - Reporting: all accuracies are per slice (each image counted separately). Patient-level accuracy is a supplementary figure only: it needs an extra aggregation rule that the task does not specify, and I use the mean of a patient's slice probabilities, thresholded at 0.5.
 
 ## 5. Results
-Tuning and negative results (clean split, ConvNeXt, single seed)
+All numbers are on the official test folder, clean split, per slice, unless labelled otherwise.
+
+### 5.1 Main comparison (single runs, seed 0)
+
+| Model | Accuracy | Balanced acc. | Macro-F1 | AUROC | AD precision | AD recall | NC precision | NC recall | Patient-level acc. (suppl.) |
+|---|---|---|---|---|---|---|---|---|---|
+| MLP | 0.628 | 0.627 | 0.621 | 0.686 | 0.669 | 0.493 | 0.604 | 0.760 | 0.665 |
+| CNN | 0.704 | 0.702 | 0.696 | 0.797 | 0.789 | 0.548 | 0.659 | 0.856 | 0.761 |
+| ConvNeXt | 0.687 | 0.687 | 0.686 | 0.753 | 0.702 | 0.641 | 0.675 | 0.732 | 0.701 |
+
+NC precision is computed from the confusion matrices (rows true, columns predicted): MLP NC->NC 3452, NC->AD 1088, AD->NC 2259, AD->AD 2201; CNN 3887, 653, 2015, 2445; ConvNeXt 3324, 1216, 1601, 2859.
+
+### 5.2 Seed variability, ensembles, confidence intervals
+
+Mean +/- sample std over three training seeds (the MLP was run once):
+
+| Model | Accuracy | AUROC |
+|---|---|---|
+| CNN (3 seeds) | 0.703 +/- 0.025 | 0.796 +/- 0.009 |
+| ConvNeXt (3 seeds) | 0.693 +/- 0.005 | 0.762 +/- 0.010 |
+
+Patient-level bootstrap (1,000 resamples of the 331 test patients; whole patients are resampled because errors cluster by patient), 95% intervals, and the logit-average ensembles of the three seeds. "Intensity-only" is a logistic regression on three global image statistics (mean intensity, contrast, foreground fraction), fitted on the training slices.
+
+| Model | Accuracy [95% CI] | AUROC [95% CI] |
+|---|---|---|
+| MLP | 0.628 [0.587, 0.673] | 0.686 [0.633, 0.742] |
+| CNN | 0.704 [0.661, 0.749] | 0.797 [0.749, 0.841] |
+| ConvNeXt | 0.687 [0.652, 0.723] | 0.753 [0.709, 0.795] |
+| CNN x3 ensemble | 0.729 [0.686, 0.772] | 0.806 [0.758, 0.850] |
+| ConvNeXt x3 ensemble | 0.702 [0.668, 0.737] | 0.773 [0.730, 0.815] |
+| Intensity-only | 0.606 [0.570, 0.642] | 0.665 [0.620, 0.709] |
+
+Paired differences against single ConvNeXt (model minus ConvNeXt, same resamples; p-values are uncorrected for multiple comparisons and p < 0.001 means below about 0.002):
+
+| Model | Delta accuracy [95% CI] | p | Delta AUROC [95% CI] | p |
+|---|---|---|---|---|
+| MLP | -0.059 [-0.089, -0.029] | < 0.001 | -0.067 [-0.099, -0.035] | < 0.001 |
+| CNN | +0.017 [-0.019, +0.053] | 0.31 | +0.044 [+0.014, +0.075] | 0.004 |
+| CNN x3 | +0.043 [+0.010, +0.073] | 0.010 | +0.054 [+0.024, +0.084] | 0.002 |
+| ConvNeXt x3 | +0.015 [+0.003, +0.027] | 0.010 | +0.020 [+0.008, +0.031] | < 0.001 |
+| Intensity-only | -0.081 [-0.119, -0.045] | < 0.001 | -0.088 [-0.129, -0.047] | < 0.001 |
+
+Reading: the best model (CNN x3, 0.729, upper CI 0.772) does not reach 0.80. The CNN and ConvNeXt are tied on accuracy within noise, but the CNN has a significantly higher AUROC (also visible in the seed means). The bootstrap reflects which test patients were drawn; the seed std reflects training randomness. Ensembling gives small but consistent gains. Three global image statistics already give 0.606 accuracy, so some of the models' score is reachable without anatomy; ConvNeXt adds about 8 points over that.
+
+
+### 5.3 Tuning and negative results (clean split, ConvNeXt, single seed)
 
 Every configuration tried is listed (no cherry-picking). Selection used validation AUROC at the selected epoch only; test numbers are shown for transparency. Differences below about 0.01 validation AUROC are within the noise of an 85-subject validation set (per-epoch swings of up to 0.05).
 
