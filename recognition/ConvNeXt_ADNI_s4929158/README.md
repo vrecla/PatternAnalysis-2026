@@ -57,6 +57,26 @@ Python 3.11.13 with matplotlib 3.11.2, numpy 2.4.6, pillow 12.3.0, scikit-learn 
 - Reporting: all accuracies are per slice (each image counted separately). Patient-level accuracy is a supplementary figure only: it needs an extra aggregation rule that the task does not specify, and I use the mean of a patient's slice probabilities, thresholded at 0.5.
 
 ## 5. Results
+Tuning and negative results (clean split, ConvNeXt, single seed)
+
+Every configuration tried is listed (no cherry-picking). Selection used validation AUROC at the selected epoch only; test numbers are shown for transparency. Differences below about 0.01 validation AUROC are within the noise of an 85-subject validation set (per-epoch swings of up to 0.05).
+
+| Run | Change from the base recipe | Val AUROC | Test acc | Test AUROC |
+|---|---|---|---|---|
+| v1 | drop path 0.1 | 0.839 | 0.692 | 0.768 |
+| **v2 (final)** | **drop path 0.3** | **0.856** | **0.687** | **0.753** |
+| v3 | + weight decay 0.1, lr 2e-4 | 0.829 | 0.680 | 0.756 |
+| v4, v6, v7 | stronger augmentation (with variants) | training collapsed | about 0.50 | n/a |
+| v5 | small model (1.90M parameters) | 0.830 | 0.666 | 0.769 |
+| v10 | + horizontal flip | 0.846 | 0.681 | 0.785 |
+| v11 | + mixup 0.2 | 0.844 | 0.631 | 0.691 |
+| v12 | large model (27.8M parameters) | 0.855 | 0.617 | 0.769 |
+| v13 | + EMA 0.999 | 0.845 | 0.671 | 0.756 |
+| v14 | smoothed epoch selection (3 epochs) | 0.840 | 0.646 | 0.763 |
+| v15 | EMA 0.998 + smoothed selection | 0.845 | 0.671 | 0.756 |
+
+No variant beat v2 on validation by more than the noise level, so v2 was kept. Model size, augmentation, EMA and smoothing all land in the same band, which suggests that data (about 600 training subjects after removing the overlap) limits performance more than the architecture. The strong-augmentation runs failed to train (training accuracy stayed near 0.55); the cause was not investigated. The EMA runs make the validation curve smooth and settle near 0.845, suggesting that the true validation AUROC of the base recipe is about 0.84 to 0.85 and that v2's 0.856 is partly a lucky epoch. Because several configurations were compared on one small validation set, the selection carries a multiple-comparisons caveat.
+
 
 ## 6. Open research dilemma
 
