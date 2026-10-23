@@ -125,6 +125,55 @@ No variant beat v2 on validation by more than the noise level, so v2 was kept. M
 
 ## 6. Open research dilemma
 
+### 6.1 Benchmarking against the baselines
+
+See Sections 5.1 and 5.2. ConvNeXt (0.693 +/- 0.005 accuracy, 0.762 +/- 0.010 AUROC) clearly beats the MLP (0.628 / 0.686) and the intensity-only baseline (0.606 / 0.665), ties the CNN on accuracy, and trails the CNN on AUROC (0.796 +/- 0.009). Per class, ConvNeXt finds more AD cases (recall 0.641 against 0.548 for the CNN) at the cost of more false alarms (NC recall 0.732 against 0.856). The CNN is more specific; which one is preferable depends on the relative cost of missed AD and false alarms. A likely reason is that both models are mostly picking up coarse, global appearance cues (overall intensity and scan style) rather than fine anatomy, and a small BatchNorm CNN with a quarter of the parameters can learn such cues as easily as ConvNeXt; this is a hypothesis I did not test, though the intensity-only baseline (0.606 accuracy) shows that simple global statistics already carry some signal.
+
+### 6.2 Calibration and reject option
+
+Temperature T is fitted on validation logits only and applied to test.
+
+| Model | T | ECE raw | ECE scaled | NLL raw | NLL scaled | Brier |
+|---|---|---|---|---|---|---|
+| MLP | 1.17 | 0.059 | 0.037 | 0.656 | 0.648 | 0.230 |
+| CNN | 3.99 | 0.252 | 0.136 | 2.021 | 0.686 | 0.265 |
+| ConvNeXt | 1.64 | 0.156 | 0.077 | 0.728 | 0.614 | 0.231 |
+| CNN x3 | 2.73 | 0.214 | 0.121 | 1.316 | 0.636 | 0.234 |
+| ConvNeXt x3 | 1.37 | 0.109 | 0.059 | 0.627 | 0.583 | 0.208 |
+| Intensity-only | 1.10 | 0.044 | 0.032 | 0.668 | 0.664 | 0.236 |
+
+The CNN is strongly overconfident (T = 3.99). ConvNeXt is better calibrated before and after scaling, and the ConvNeXt ensemble is best (ECE 0.059, NLL 0.583, Brier 0.208). ECE alone is misleading: the intensity-only model has the lowest ECE because a weak, never-confident model is easy to calibrate, so NLL, Brier and AUROC must be read alongside it. ConvNeXt meets calibration target 3 (ECE <= 0.10 after scaling).
+
+![Reliability diagrams](analysis/reliability.png)
+
+Reject option: the threshold on calibrated confidence is chosen on validation so that the error among accepted slices is at most 10%, then applied to test.
+
+| Model | Threshold | Test coverage | Test error among accepted | Error at 80% coverage | AURC |
+|---|---|---|---|---|---|
+| MLP | 0.927 | 0.2% | 9.1% | 33.9% | 0.296 |
+| CNN | 0.716 | 77.2% | 24.3% | 25.0% | 0.191 |
+| ConvNeXt | 0.830 | 39.4% | 19.8% | 27.7% | 0.209 |
+| CNN x3 | 0.629 | 87.9% | 24.4% | 22.3% | 0.161 |
+| ConvNeXt x3 | 0.834 | 36.6% | 16.1% | 25.7% | 0.190 |
+| Intensity-only | 0.878 | 2.9% | 25.1% | 37.4% | 0.322 |
+
+![Risk-coverage curves](analysis/risk_coverage.png)
+
+No model meets acceptance criterion 4 (at least 90% accuracy among accepted slices at 30% coverage or more): the best, ConvNeXt x3, has 16.1% error at 36.6% coverage. The validation-chosen threshold does not transfer to test, because the validation set is easier (about 0.76 validation accuracy against 0.69 on test) and confidence barely separates right from wrong: ConvNeXt's mean calibrated confidence is 0.784 on correct and 0.719 on incorrect test slices (`predictions/convnext_v2_dp/confidence_hist.png`). A reject option tuned on a small validation set therefore gives a false sense of safety under this distribution shift.
+
+### 6.3 Resource profiling
+
+| Model | Parameters | Peak train VRAM (MB) | Latency (ms/img, batch 1) | Throughput (img/s, batch 64) | Train time (min) | Best epoch |
+|---|---|---|---|---|---|---|
+| MLP | 590,722 | 40 | 0.16 | 388,134 | 4.9 | 28 |
+| CNN | 1,173,154 | 2,017 | 1.02 | 5,149 | 6.8 | 32 |
+| ConvNeXt | 4,832,018 | 1,885 | 5.55 | 5,291 | 4.2 | 15 |
+| CNN x3 | 3,519,462 | 2,017 | 3.17 | 1,718 | 16.2 | mixed |
+| ConvNeXt x3 | 14,496,054 | 1,885 | 17.54 | 1,756 | 10.8 | mixed |
+
+Throughput is the model forward pass on a batch of 64 and excludes data loading. Ensemble rows add the members' parameters, latency and training time. The ConvNeXt is about 5 times slower than the CNN per image at batch 1 (many small layers) but equal at batch 64. Every single model meets resource criterion 5 (one A100, batch-1 latency of at most 10 ms; ConvNeXt 5.55 ms). The three-member ConvNeXt ensemble does not (17.54 ms).
+
+
 ## 7. Artificial Intelligence Usage Disclosure
 
 ## 8. References
