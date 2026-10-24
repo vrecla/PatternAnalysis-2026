@@ -108,6 +108,21 @@ Reading: the best model (CNN x3, 0.729, upper CI 0.772) does not reach 0.80. The
 - Share of ConvNeXt's errors that other models also make: MLP 69.6% (chance level, from that model's own error rate: about 37%), CNN 57.9% (about 30%), intensity-only 60.0% (about 39%). Errors are strongly shared across models, well above chance.
 - Patient-level accuracy (0.701) is close to slice accuracy (0.687): averaging a patient's slices does not fix a patient the model gets wrong.
 
+**Acquisition-era shortcut.** Because the training classes differ perfectly in acquisition year (Section 4), I checked how much of the test score the year alone explains.
+- A rule that assigns AD to scans up to 2016 and NC to later scans (derived from the training folder alone) scores 0.733 per test slice (0.624 if 2014 to 2016 are assigned to NC). The models score 0.628 to 0.757 (Section 5.1 and 5.4), so their aggregate accuracy is about what the year alone gives.
+- A fairer check uses only the 2019 to 2021 test scans (6,280 slices, 72% NC), where both classes exist and the year cannot give the answer away:
+
+| Model | Accuracy | AUROC | AD recall | NC recall | AD recall on AD scans before 2019 |
+|---|---|---|---|---|---|
+| MLP, clean | 0.667 | 0.628 | 0.422 | 0.760 | 0.539 |
+| CNN, clean | 0.691 | 0.667 | 0.261 | 0.856 | 0.732 |
+| ConvNeXt, clean | 0.671 | 0.682 | 0.510 | 0.732 | 0.725 |
+| MLP, leaky | 0.652 | 0.645 | 0.459 | 0.726 | 0.664 |
+| CNN, leaky | 0.735 | 0.744 | 0.210 | 0.937 | 0.808 |
+| ConvNeXt, leaky | 0.739 | 0.717 | 0.287 | 0.912 | 0.734 |
+
+- Always predicting NC would score 0.72 on these slices, so the clean models do not beat that trivial rule on accuracy there, and the leaky CNN and ConvNeXt barely do. Their AUROC inside the era (0.63 to 0.74) is the measure of signal that the year cannot explain, and it is modest.
+- Every model finds far fewer AD cases among 2019 to 2021 scans than among earlier AD scans (CNN 0.26 against 0.73, ConvNeXt 0.51 against 0.73). This is what an era shortcut predicts, since all training scans from that era are NC. ConvNeXt is affected less than the CNN. Differences between models inside the era were not tested for significance.
 
 ## 5.4 Effect of the data leak
 
