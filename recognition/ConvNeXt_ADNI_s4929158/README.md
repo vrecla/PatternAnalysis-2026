@@ -101,8 +101,15 @@ Paired differences against single ConvNeXt (model minus ConvNeXt, same resamples
 
 Reading: the best model (CNN x3, 0.729, upper CI 0.772) does not reach 0.80. The CNN and ConvNeXt are tied on accuracy within noise, but the CNN has a significantly higher AUROC (also visible in the seed means). The bootstrap reflects which test patients were drawn; the seed std reflects training randomness. Ensembling gives small but consistent gains. Three global image statistics already give 0.606 accuracy, so some of the models' score is reachable without anatomy; ConvNeXt adds about 8 points over that.
 
+## 5.3 Where the errors are
 
-## 5.3 Effect of the data leak
+- Error rate by slice index is flat, about 0.26 to 0.37 for every slice index from 78 to 114 (`analysis/slice_error.png`, ConvNeXt). No slice position is clearly informative or uninformative.
+- 2,817 of 9,000 test slices are misclassified by ConvNeXt, spread over 237 of 331 patients. 103 patients have at least half their slices wrong, and they account for 70.9% of all errors.
+- Share of ConvNeXt's errors that other models also make: MLP 69.6% (chance level, from that model's own error rate: about 37%), CNN 57.9% (about 30%), intensity-only 60.0% (about 39%). Errors are strongly shared across models, well above chance.
+- Patient-level accuracy (0.701) is close to slice accuracy (0.687): averaging a patient's slices does not fix a patient the model gets wrong.
+
+
+## 5.4 Effect of the data leak
 
 "Leaky" keeps the 216 subjects shared by the official train and test folders in training (train 18,100 slices, validation 3,420; train/validation are still separated by subject). It is a different and more favourable setup, and also uses 67% more training data, so the table cannot separate "more data" from "leakage". Single seed (0) on both sides; do not use leaky numbers as results.
 
@@ -130,7 +137,7 @@ The CNN beats ConvNeXt in both settings. Within the leaky setup, ConvNeXt with a
 - The clean models also score much higher on the shared group than on the unseen group (for example CNN 0.856 against 0.456), although neither group was seen in training. So the two groups differ in difficulty for reasons other than memorisation, and the raw shared-versus-unseen gap should not be read as memorisation alone. The groups differ in class mix and era: the shared subjects are 278 scans with an AD share of 0.37 and a mean acquisition year of 2017.4, the unseen subjects are 172 scans with an AD share of 0.69 and a mean year of 2019.3. Unseen subjects are therefore mostly AD scans from the later era, which is where the year shortcut of Section 5.3 fails.
 - Acquisition years (from the raw file names, scans): training 2011 to 2013 (520) and 2017 to 2018 (445), with 111 from 2019 to 2021; test mostly 2019 to 2020 (280 of 450 scans, 62%). ConvNeXt (clean) accuracy by test scan year is not monotonic: 0.77 (2013), 0.83 (2014), 0.44 (2015, 4 scans), 0.57 (2017, 5 scans), 0.54 (2018), 0.68 (2019), 0.69 (2020), 0.55 (2021). Several years have very few scans, so this shows a possible time shift but does not establish it.
 
-### 5.4 Tuning and negative results (clean split, ConvNeXt, single seed)
+### 5.5 Tuning and negative results (clean split, ConvNeXt, single seed)
 
 Every configuration tried is listed (no cherry-picking). Selection used validation AUROC at the selected epoch only; test numbers are shown for transparency. Differences below about 0.01 validation AUROC are within the noise of an 85-subject validation set (per-epoch swings of up to 0.05).
 
