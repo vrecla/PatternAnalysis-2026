@@ -102,7 +102,35 @@ Paired differences against single ConvNeXt (model minus ConvNeXt, same resamples
 Reading: the best model (CNN x3, 0.729, upper CI 0.772) does not reach 0.80. The CNN and ConvNeXt are tied on accuracy within noise, but the CNN has a significantly higher AUROC (also visible in the seed means). The bootstrap reflects which test patients were drawn; the seed std reflects training randomness. Ensembling gives small but consistent gains. Three global image statistics already give 0.606 accuracy, so some of the models' score is reachable without anatomy; ConvNeXt adds about 8 points over that.
 
 
-### 5.3 Tuning and negative results (clean split, ConvNeXt, single seed)
+## 5.3 Effect of the data leak
+
+"Leaky" keeps the 216 subjects shared by the official train and test folders in training (train 18,100 slices, validation 3,420; train/validation are still separated by subject). It is a different and more favourable setup, and also uses 67% more training data, so the table cannot separate "more data" from "leakage". Single seed (0) on both sides; do not use leaky numbers as results.
+
+| Model | Clean acc / AUROC | Leaky acc / AUROC | Delta acc | Delta AUROC |
+|---|---|---|---|---|
+| MLP | 0.628 / 0.686 | 0.655 / 0.716 | +0.027 | +0.030 |
+| CNN | 0.704 / 0.797 | 0.757 / 0.864 | +0.053 | +0.067 |
+| ConvNeXt | 0.687 / 0.753 | 0.737 / 0.826 | +0.050 | +0.073 |
+
+The CNN beats ConvNeXt in both settings. Within the leaky setup, ConvNeXt with a horizontal flip scored 0.684 / 0.801 and with mixup (alpha 0.2) 0.714 / 0.784 (test loss 0.608 against 1.065 for the baseline), so neither helped accuracy or AUROC in these single runs.
+
+**Shared versus unseen test subjects.** The official test folder holds 331 subjects. 216 of them (5,560 slices) also have scans in the official training folder ("shared"); the other 115 (3,440 slices) do not ("unseen"). Test accuracy / AUROC for each group, single runs:
+
+| Run | Shared subjects (5,560 slices) | Unseen subjects (3,440 slices) | All 9,000 slices |
+|---|---|---|---|
+| MLP, clean | 0.694 / 0.752 | 0.522 / 0.648 | 0.628 / 0.686 |
+| CNN, clean | 0.856 / 0.938 | 0.456 / 0.643 | 0.704 / 0.797 |
+| ConvNeXt, clean | 0.743 / 0.833 | 0.597 / 0.688 | 0.687 / 0.753 |
+| MLP, leaky | 0.731 / 0.810 | 0.533 / 0.629 | 0.655 / 0.716 |
+| CNN, leaky | 0.956 / 0.992 | 0.437 / 0.692 | 0.757 / 0.864 |
+| ConvNeXt, leaky | 0.892 / 0.951 | 0.487 / 0.720 | 0.737 / 0.826 |
+
+- On the leaky models the score is carried by the shared subjects (0.89 to 0.96) while accuracy on unseen subjects is at or below chance (0.44 to 0.49, with AUROC 0.69 to 0.72, so the models still rank cases somewhat but their threshold is wrong for new subjects).
+- A matched comparison separates memorisation from the rest. The clean models never saw the shared subjects, so leaky minus clean on the shared subjects is the effect of having a subject's other visits in training: +0.037 (MLP), +0.100 (CNN), +0.149 (ConvNeXt). On unseen subjects the same difference is +0.011, -0.019 and -0.110. These are single runs, so differences of a few points are within noise.
+- The clean models also score much higher on the shared group than on the unseen group (for example CNN 0.856 against 0.456), although neither group was seen in training. So the two groups differ in difficulty for reasons other than memorisation, and the raw shared-versus-unseen gap should not be read as memorisation alone. The groups differ in class mix and era: the shared subjects are 278 scans with an AD share of 0.37 and a mean acquisition year of 2017.4, the unseen subjects are 172 scans with an AD share of 0.69 and a mean year of 2019.3. Unseen subjects are therefore mostly AD scans from the later era, which is where the year shortcut of Section 5.3 fails.
+- Acquisition years (from the raw file names, scans): training 2011 to 2013 (520) and 2017 to 2018 (445), with 111 from 2019 to 2021; test mostly 2019 to 2020 (280 of 450 scans, 62%). ConvNeXt (clean) accuracy by test scan year is not monotonic: 0.77 (2013), 0.83 (2014), 0.44 (2015, 4 scans), 0.57 (2017, 5 scans), 0.54 (2018), 0.68 (2019), 0.69 (2020), 0.55 (2021). Several years have very few scans, so this shows a possible time shift but does not establish it.
+
+### 5.4 Tuning and negative results (clean split, ConvNeXt, single seed)
 
 Every configuration tried is listed (no cherry-picking). Selection used validation AUROC at the selected epoch only; test numbers are shown for transparency. Differences below about 0.01 validation AUROC are within the noise of an 85-subject validation set (per-epoch swings of up to 0.05).
 
