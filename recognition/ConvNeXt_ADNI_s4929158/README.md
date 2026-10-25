@@ -246,6 +246,15 @@ Looking at `failure_cases.png`, the five cases come from three patients (cases 1
 - Because confidence barely separates right from wrong (Section 6.2), confident errors like cases 1, 2, 4 and 5 cannot be caught by a confidence threshold.
 - Intensity statistics distinguish the classes only partially (the means differ by less than one standard deviation), so these three numbers are only weak evidence.
 
+### 6.5 Recommendation to the project manager
+- **Do not advance this model as a classifier.** Per-slice accuracy is about 0.69 (95% CI 0.65 to 0.72), well below the 0.80 target; the best system tried (a three-CNN ensemble) reaches 0.729 (upper CI 0.772).
+- **The data, not the architecture, is the main problem.** In the training folder, acquisition year separates AD from NC perfectly, and a year-only rule scores 0.733 on the test set, about what the models score. Inside the 2019 to 2021 test scans, where the year cannot decide, the models' accuracy (0.67 to 0.69 for the clean ones) is no better than always predicting NC (0.72), and their AUROC is 0.63 to 0.68. A headline accuracy near 0.7 therefore says little about whether the models detect Alzheimer's disease.
+- **ConvNeXt's extra cost is not clearly justified.** On the full test set the CNN baseline is as accurate and has a higher AUROC with about a quarter of the parameters. ConvNeXt is better calibrated (single model) and misses fewer AD cases (recall 0.641 against 0.548). Inside the 2019 to 2021 test scans it has the highest AUROC of the clean models (0.682 against 0.667 for the CNN and 0.628 for the MLP; not tested for significance) and far higher AD recall (0.51 against 0.26), so it leans less on the era cue. If one model had to be chosen, the choice depends on how costly a missed AD case is.
+- **Do not deploy the reject option as tuned.** Confidence barely separates right from wrong, and no validation-tuned threshold reached the 10% error target on test (best 16.1% at 36.6% coverage). A reject option would need patient-level confidence and a larger, more representative validation set.
+- **Evaluate per patient, not per slice.** Errors cluster by patient (103 of 331 patients account for 70.9% of errors) and slices from one patient are correlated, so slice-level accuracy overstates how many independent cases were tested. Use patient-level splits and confidence intervals.
+- **Caveats.** The official train and test folders share 216 subjects, which inflates results if not removed; results here are on the cleaned split. The validation set is small (85 subjects), and several configurations were compared on it. Single seeds were used for most ablations.
+- **Next steps if the project continued:** training data in which AD and NC scans come from the same era and scanners (no choice of model or split can fix the current confound), more subjects, evaluation reported separately by acquisition era, and checking why some NC scans from the later era (for example patient 031_S_4021) are confidently called AD.
+
 ## 7. Artificial Intelligence Usage Disclosure
 
 ## 8. References
