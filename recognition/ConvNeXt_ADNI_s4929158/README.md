@@ -223,6 +223,28 @@ No model meets acceptance criterion 4 (at least 90% accuracy among accepted slic
 
 Throughput is the model forward pass on a batch of 64 and excludes data loading. Ensemble rows add the members' parameters, latency and training time. The ConvNeXt is about 5 times slower than the CNN per image at batch 1 (many small layers) but equal at batch 64. Every single model meets resource criterion 5 (one A100, batch-1 latency of at most 10 ms; ConvNeXt 5.55 ms). The three-member ConvNeXt ensemble does not (17.54 ms).
 
+### 6.4 Failure-case autopsies
+
+Selected automatically from ConvNeXt's test errors (`analysis/failure_cases.png`, `analysis/failure_cases.csv`). Reference statistics are the mean +/- std over correctly classified test slices: NC mean intensity 0.123 +/- 0.020, contrast 0.233 +/- 0.029, foreground fraction 0.255 +/- 0.023; AD 0.110 +/- 0.019, 0.214 +/- 0.031, 0.250 +/- 0.025.
+
+![Failure cases](analysis/failure_cases.png)
+
+| # | Case | Conf. | Patient, slice | Patient's wrong slices | Mean intensity / contrast / foreground |
+|---|---|---|---|---|---|
+| 1 | confident false negative (AD predicted NC) | 0.95 | 130_S_6072, 104 | 57/80 | 0.125 / 0.240 / 0.248 |
+| 2 | confident false positive (NC predicted AD) | 0.96 | 031_S_4021, 97 | 20/20 | 0.144 / 0.254 / 0.285 |
+| 3 | borderline error (probability near 0.5) | 0.50 | 033_S_4177, 87 | 12/20 | 0.115 / 0.210 / 0.283 |
+| 4 | confident false negative (AD predicted NC) | 0.95 | 130_S_6072, 105 | 57/80 | 0.121 / 0.233 / 0.247 |
+| 5 | confident false positive (NC predicted AD) | 0.95 | 031_S_4021, 98 | 20/20 | 0.150 / 0.264 / 0.286 |
+
+Observations:
+Looking at `failure_cases.png`, the five cases come from three patients (cases 1 and 4 are adjacent slices of one scan, and so are cases 2 and 5). The AD scans of 130_S_6072 are darker, softer and lower in contrast than the others, so they look unlike the sharp scans the model saw for NC. The NC scans of 031_S_4021 are bright and sharp with an enlarged ventricle and widened sulci, so the model’s AD call plausibly follows real anatomy that the NC label does not reflect. The NC scan of 033_S_4177 is grainy with a noisy brain edge, which looks like an acquisition or processing artefact and fits its borderline probability of 0.50. In all three cases the appearance of the scan, not just disease, seems to drive the prediction. I judged this by eye and did not test it.
+- Cases 1 and 4 are adjacent slices of the same patient, as are cases 2 and 5, so there are only three distinct patients. Each patient is wrong on most of their slices (57/80 and 20/20), so these are patient-level failures, not isolated slices. This fits Section 5.3: 103 patients account for 70.9% of errors.
+- Patient 130_S_6072 (cases 1 and 4, AD) has four scans from 2017 to 2019, an era in which every training scan is NC, and only 29% of this patient's slices are classified correctly. This fits the acquisition-era shortcut of Section 5.3: the scan date looks like an NC scan. In the images these scans are darker, softer and lower in contrast than the other cases, with a hazy grey band around the cortex, and the mean intensity of case 1 is close to the NC average (0.125 against 0.123 for NC and 0.110 for AD).
+- Patient 031_S_4021 (cases 2 and 5, NC) has a single scan from 2019 and every one of its 20 slices is predicted AD with about 0.95 confidence. The era shortcut would predict NC for a 2019 scan, so it does not explain this error. The slices are brighter and sharper than typical NC slices (mean intensity 0.144 to 0.150 against 0.123 +/- 0.020) with a larger foreground fraction, and the images show an enlarged lateral ventricle and widened sulci. To my eye this looks atrophic, so the AD prediction may follow real anatomy that the NC label does not reflect. I judged this by eye and did not test it.
+- Case 3 (patient 033_S_4177, NC, 2020) is a genuinely ambiguous slice (confidence 0.50) of a patient who is wrong on 12 of 20 slices, the kind of case a reject option should catch. The image is grainy with a speckled, jagged brain edge, which looks like an acquisition or processing artefact.
+- Because confidence barely separates right from wrong (Section 6.2), confident errors like cases 1, 2, 4 and 5 cannot be caught by a confidence threshold.
+- Intensity statistics distinguish the classes only partially (the means differ by less than one standard deviation), so these three numbers are only weak evidence.
 
 ## 7. Artificial Intelligence Usage Disclosure
 
