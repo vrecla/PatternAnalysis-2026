@@ -256,5 +256,14 @@ Looking at `failure_cases.png`, the five cases come from three patients (cases 1
 - **Next steps if the project continued:** training data in which AD and NC scans come from the same era and scanners (no choice of model or split can fix the current confound), more subjects, evaluation reported separately by acquisition era, and checking why some NC scans from the later era (for example patient 031_S_4021) are confidently called AD.
 
 ## 7. Artificial Intelligence Usage Disclosure
+- **Tools:** Claude (Anthropic) used as a coding and writing assistant.
+- **Tasks:** scaffolding `dataset.py`, `modules.py`, `train.py`, `evaluate.py`, `predict.py` and the Slurm script; debugging Rangpur/Slurm issues; suggesting experiments and statistical analysis (patient-level bootstrap, ensembles, baselines); drafting this README structure and the tables from the generated outputs.
+- **Verification:** I personally reviewed every line of the code I submitted, conducted the data audit and examined subject overlap myself, reran the experiments and verified the logs, cross-checked the metrics against the raw logs, reviewed the failure-case images, and independently wrote the interpretation and recommendations.
 
 ## 8. References
+1. Z. Liu, H. Mao, C.-Y. Wu, C. Feichtenhofer, T. Darrell, S. Xie, "A ConvNet for the 2020s", CVPR 2022.
+2. C. Guo, G. Pleiss, Y. Sun, K. Q. Weinberger, "On Calibration of Modern Neural Networks", ICML 2017 (temperature scaling).
+3. I. Loshchilov, F. Hutter, "Decoupled Weight Decay Regularization", ICLR 2019 (AdamW).
+4. G. Huang, Y. Sun, Z. Liu, D. Sedra, K. Q. Weinberger, "Deep Networks with Stochastic Depth", ECCV 2016.
+5. H. Zhang, M. Cisse, Y. Dauphin, D. Lopez-Paz, "mixup: Beyond Empirical Risk Minimization", ICLR 2018.
+6. Alzheimer's Disease Neuroimaging Initiative (ADNI), adni.loni.usc.edu, via the course copy.
