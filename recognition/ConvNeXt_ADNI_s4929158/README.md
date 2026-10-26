@@ -42,6 +42,21 @@ COMP3710/COMP7710 Pattern Recognition, individual project (Hard difficulty). Stu
 ## 3. Dependencies and reproducibility
 Python 3.11.13 with matplotlib 3.11.2, numpy 2.4.6, pillow 12.3.0, scikit-learn 1.9.1, scipy 1.17.1, torch 2.5.1+cu121 and torchvision 0.20.1+cu121.
 
+Run on Rangpur (venv at `~/venvs/comp3710`). Final models:
+```bash
+python dataset.py --audit                                   # data audit and split report
+TAG=auroc EXTRA="--select-metric auroc" sbatch train.sbatch mlp          # runs/mlp_auroc
+TAG=auroc EXTRA="--select-metric auroc" sbatch train.sbatch cnn          # runs/cnn_auroc  (seeds: --seed 1/2, TAG=auroc_s1/auroc_s2)
+TAG=v2_dp EXTRA="--select-metric auroc --drop-path 0.3" sbatch train.sbatch convnext   # runs/convnext_v2_dp (seeds: --seed 1/2, TAG=v2_dp_s1/v2_dp_s2)
+python evaluate.py --runs runs/mlp_auroc runs/cnn_auroc runs/convnext_v2_dp \
+  --names MLP CNN ConvNeXt --focus ConvNeXt \
+  --ensemble "CNN x3" runs/cnn_auroc runs/cnn_auroc_s1 runs/cnn_auroc_s2 \
+  --ensemble "ConvNeXt x3" runs/convnext_v2_dp runs/convnext_v2_dp_s1 runs/convnext_v2_dp_s2 \
+  --intensity-baseline --bootstrap 1000                     # writes analysis/summary.md and figures
+python predict.py --checkpoint runs/convnext_v2_dp/best.pt --temperature 1.64   # example inference and figures
+```
+Seeds: split seed 42 (fixed), training seeds 0, 1, 2 (`--seed`: initial weights, shuffling, augmentation). Model selection uses validation AUROC only (never the test set). `modules.py` imports only `torch` and `torch.nn`. Checkpoints (`*.pt`) and per-slice prediction CSVs are not committed.
+
 ## 4. Data and pre-processing
 - Images resized to 224x224, single channel, normalised. Training augmentation is mild (small affine transform and brightness/contrast jitter, no flips, to avoid changing laterality). A horizontal flip, mixup and a stronger augmentation recipe were tested as ablations (Section 5.5).
 - **Splits:** subject-level, stratified by each subject's majority label. 15% of training subjects (85 subjects, 1,880 slices) are held out for validation. `assert_no_leakage` checks that no subject is in two splits. The 216 subjects shared by the official train and test folders are removed from training only (8,820 slices), leaving 10,820 training slices. The official test folder (9,000 slices, 331 patients) is untouched and used once, at the end, with the checkpoint chosen on validation.
