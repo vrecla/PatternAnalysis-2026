@@ -1,0 +1,6 @@
+category,path,patient,slice_idx,true,pred,confidence,patient_slices,patient_wrong_slices,mean_intensity,contrast_std,foreground_frac
+confident false negative (AD predicted NC),/home/groups/comp3710/ADNI/AD_NC/test/AD/895578_104.jpeg,130_S_6072,104,AD,NC,0.9470975009405666,80,57,0.12475113613153595,0.2401100561344296,0.24767252604166667
+confident false positive (NC predicted AD),/home/groups/comp3710/ADNI/AD_NC/test/NC/1253141_97.jpeg,031_S_4021,97,NC,AD,0.956344608513114,20,20,0.14406952103758167,0.2544865079136376,0.2845540364583333
+borderline error (probability near 0.5),/home/groups/comp3710/ADNI/AD_NC/test/NC/1280292_87.jpeg,033_S_4177,87,NC,AD,0.5000272399012633,20,12,0.11505687040441177,0.21002297056359764,0.2830891927083333
+confident false negative (AD predicted NC),/home/groups/comp3710/ADNI/AD_NC/test/AD/895578_105.jpeg,130_S_6072,105,AD,NC,0.9458517441649478,80,57,0.12126416973039215,0.23268719820862613,0.24713541666666666
+confident false positive (NC predicted AD),/home/groups/comp3710/ADNI/AD_NC/test/NC/1253141_98.jpeg,031_S_4021,98,NC,AD,0.9543894303346647,20,20,0.15041736877042483,0.2643855043665487,0.28642578125

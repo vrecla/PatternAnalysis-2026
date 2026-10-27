@@ -1,0 +1,41 @@
+{
+  "model": "convnext",
+  "best_epoch": 11,
+  "epochs_run": 21,
+  "test_acc": 0.6924444437026978,
+  "test_loss": 0.6262995198302799,
+  "test_auroc": 0.7679232927046087,
+  "val_loss_at_best": 0.5246267379598415,
+  "trainable_params": 4832018,
+  "peak_train_vram_mb": 1885.4228515625,
+  "train_seconds": 243.01915206108242,
+  "class_names": {
+    "0": "NC",
+    "1": "AD"
+  },
+  "latency_ms_batch1": 5.971149243414402,
+  "throughput_img_per_s_batch64": 5313.454136828873,
+  "args": {
+    "model": "convnext",
+    "root": "/home/groups/comp3710/ADNI/AD_NC",
+    "out_dir": "runs/convnext_v1_auroc",
+    "epochs": 40,
+    "batch_size": 64,
+    "lr": 0.0005,
+    "weight_decay": 0.05,
+    "warmup_epochs": 3,
+    "clip_grad": 1.0,
+    "patience": 10,
+    "select_metric": "auroc",
+    "drop_path": null,
+    "img_size": 224,
+    "val_fraction": 0.15,
+    "group_by": "subject",
+    "meta": null,
+    "drop_test_overlap": true,
+    "split_seed": 42,
+    "seed": 0,
+    "num_workers": 4,
+    "amp": true
+  }
+}
